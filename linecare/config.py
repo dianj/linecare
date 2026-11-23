@@ -27,6 +27,11 @@ MAX_HISTORY_TURNS = 16  # older user turns are dropped (whole turns, so tool-cal
 # --- Storage ---
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "data" / "linecare.db"))
 
+# --- Staff (helpdesk agent, operator console) ---
+# Demo authentication: token -> role. Override with STAFF_TOKENS="token1:operator,token2:technician".
+STAFF_TOKENS = dict(item.split(":", 1) for item in os.environ.get(
+    "STAFF_TOKENS", "demo-operator:operator,demo-technician:technician").split(",") if ":" in item)
+
 # --- CRM (see linecare/crm/) ---
 CRM_BACKEND = os.environ.get("CRM_BACKEND", "fake")  # fake (SQLite) | salesforce
 # Salesforce: an External Client App with the client-credentials flow (README, "Salesforce setup").

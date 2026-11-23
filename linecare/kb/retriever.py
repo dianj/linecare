@@ -60,22 +60,34 @@ def set_index(index) -> None:
     _index = index
 
 
-def _where(audiences: frozenset, groups: frozenset | None) -> dict:
+def _where(audiences: frozenset, groups: frozenset | None, internal_groups: frozenset | None) -> dict:
     clauses = [{"audience": {"$in": sorted(audiences)}}]
     if groups:
         clauses.append({"group": {"$in": sorted(groups)}})
+    if internal_groups is not None and "internal" in audiences:
+        # internal documents only from the given groups; other audiences unchanged
+        clauses.append({"$or": [{"audience": {"$ne": "internal"}}, {"group": {"$in": sorted(internal_groups)}}]})
     return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
 
-def search(query: str, *, audiences: frozenset, groups: frozenset | None = None, k: int = None,
-           index=None) -> SearchResult:
+def allowed(row: dict, audiences, groups, internal_groups) -> bool:
+    if row["audience"] not in audiences or (groups and row["group"] not in groups):
+        return False
+    return not (internal_groups is not None and row["audience"] == "internal" and row["group"] not in internal_groups)
+
+
+def search(query: str, *, audiences: frozenset, groups: frozenset | None = None,
+           internal_groups: frozenset | None = None, k: int = None, index=None) -> SearchResult:
+    """`internal_groups` narrows internal documents by group (staff roles); None = all internal groups."""
     if not audiences:
         raise ValueError("audiences must name at least one audience")
+    if internal_groups is not None and not internal_groups:
+        raise ValueError("internal_groups must name at least one group (or be None)")
     index = index or get_index()
-    rows = index.query(query, _where(frozenset(audiences), groups), k or config.KB_TOP_K)
+    rows = index.query(query, _where(frozenset(audiences), groups, internal_groups), k or config.KB_TOP_K)
     try:
         for row in rows:
-            if row["audience"] not in audiences or (groups and row["group"] not in groups):
+            if not allowed(row, audiences, groups, internal_groups):
                 raise AccessViolation(f"{row['doc_id']} ({row['audience']}/{row['group']}) for {sorted(audiences)}")
     except AccessViolation:
         log.exception("KB access violation; no passages returned")

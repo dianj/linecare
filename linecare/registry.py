@@ -19,6 +19,15 @@ from linecare.tools.diagnostics import (
     scan_wifi,
 )
 from linecare.tools.handover import handover_to_human
+from linecare.tools.helpdesk import (
+    add_case_comment,
+    calculate_compensation,
+    create_internal_ticket,
+    get_case,
+    get_customer_overview,
+    get_handover,
+    search_kb,
+)
 from linecare.tools.identity import verify_customer
 from linecare.tools.kb import search_help
 from linecare.tools.network import check_outage
@@ -42,7 +51,21 @@ CUSTOMER_FUNCTIONS = {
     "handover_to_human": handover_to_human,
     "record_outcome": record_outcome,
 }
-ALLOWED = {"customer": CUSTOMER_FUNCTIONS}
+HELPDESK_FUNCTIONS = {
+    "search_kb": search_kb,
+    "get_customer_overview": get_customer_overview,
+    "get_case": get_case,
+    "add_case_comment": add_case_comment,
+    "calculate_compensation": calculate_compensation,
+    "create_internal_ticket": create_internal_ticket,
+    "get_handover": get_handover,
+}
+# Staff roles: technicians do not decide credits.
+ALLOWED = {
+    "customer": CUSTOMER_FUNCTIONS,
+    "operator": HELPDESK_FUNCTIONS,
+    "technician": {k: v for k, v in HELPDESK_FUNCTIONS.items() if k != "calculate_compensation"},
+}
 
 # Tools an unverified caller may use; everything else needs a verified identity.
 PUBLIC_TOOLS = {"verify_customer", "check_outage", "search_help", "handover_to_human"}
@@ -64,6 +87,7 @@ def _gate(session, name: str) -> dict | None:
 
 
 def execute_tool_call(agent: str, session, name: str, raw_arguments: str) -> dict:
+    """`agent`: "customer", or a staff role ("operator", "technician") for the helpdesk agent."""
     functions = ALLOWED.get(agent, {})
     if name not in functions:
         return error(f"Unknown tool '{name}'. Available: {sorted(functions)}")
@@ -73,7 +97,7 @@ def execute_tool_call(agent: str, session, name: str, raw_arguments: str) -> dic
         return error(f"Tool arguments are not valid JSON: {e}")
     if not isinstance(arguments, dict):
         return error("Tool arguments must be a JSON object.")
-    refusal = _gate(session, name)
+    refusal = _gate(session, name) if agent == "customer" else None  # staff have no identity gate
     if refusal:
         return refusal
 

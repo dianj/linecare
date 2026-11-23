@@ -1,4 +1,4 @@
-"""The customer agent's tool schemas (names, descriptions, parameters), sent to the model with every request.
+"""The tool schemas of the customer and helpdesk agents (names, descriptions, parameters), sent to the model with every request.
 
 The descriptions are instructions the model reads; ruff's line-length check is relaxed for this file only.
 """
@@ -70,3 +70,44 @@ CUSTOMER_TOOLS = [
           ["outcome"]),
 ]
 
+
+# --- helpdesk agent (staff) --------------------------------------------------------------------------------------
+
+HELPDESK_TOOLS = [
+    _tool("search_kb",
+          "Search Quillnet's documents available to your role: public help articles plus internal policies (operators) or internal technical notes (technicians). Returns passages with doc_id and section to cite.",
+          {"query": {"type": "string"},
+           "scope": {"type": "string", "enum": ["all", "policy", "technical"], "description": "Narrow to one group of documents; default all."}},
+          ["query"]),
+    _tool("get_customer_overview",
+          "A customer's plan, monthly fee, account status, router, open and recent cases, outages in their area (active and last 60 days) and technician visits. Every call is audited: give the reason.",
+          {"account_no": {"type": "string", "description": "e.g. QN-100009"},
+           "reason": {"type": "string", "description": "Why you look, e.g. 'handover HO-0003, repeat drops'."}},
+          ["account_no", "reason"]),
+    _tool("get_case",
+          "A CRM case with its diagnostics and comments.",
+          {"case_ref": {"type": "string", "description": "8-digit case number, e.g. 00001001."}},
+          ["case_ref"]),
+    _tool("add_case_comment",
+          "Add an internal comment to a CRM case (what was found or done). Only when your user asks for it or approves it.",
+          {"case_ref": {"type": "string"}, "text": {"type": "string"}},
+          ["case_ref", "text"]),
+    _tool("calculate_compensation",
+          "Whether a customer gets a credit and how much, computed by the compensation policy (rules C1-C4) from the records. You only name the event; never calculate amounts yourself.",
+          {"account_no": {"type": "string"},
+           "event": {"type": "string", "enum": ["outage", "technician_no_show", "repeat_fault"]},
+           "outage_id": {"type": "string", "description": "For event outage, when the area had more than one."},
+           "case_ref": {"type": "string", "description": "For repeat_fault (its category) or technician_no_show."},
+           "category": {"type": "string", "description": "For repeat_fault without a case_ref."}},
+          ["account_no", "event"]),
+    _tool("create_internal_ticket",
+          "Open a ticket for the network, provisioning or billing team (e.g. a router configuration push, a recurring line fault), linked to a case. Only when your user asks for it or approves it.",
+          {"team": {"type": "string", "enum": ["network", "provisioning", "billing"]},
+           "summary": {"type": "string", "description": "What the team should do and why, two or three sentences."},
+           "case_ref": {"type": "string"}},
+          ["team", "summary"]),
+    _tool("get_handover",
+          "A handover from the customer assistant: the structured summary and the last turns of the conversation (secrets removed).",
+          {"handover_id": {"type": "string", "description": "e.g. HO-0001"}},
+          ["handover_id"]),
+]

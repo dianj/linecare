@@ -1,5 +1,5 @@
-"""FastAPI app: the customer chat (text or voice), text-to-speech, model switching, health, and the mock
-enterprise systems under /mock.
+"""FastAPI app: the customer chat (text or voice), the operator console and helpdesk chat for staff,
+text-to-speech, model switching, health, and the mock enterprise systems under /mock.
 
 The logic lives in the `linecare` package; this module wires it to HTTP. Run with: uvicorn server:app
 """
@@ -14,19 +14,21 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel, Field
 
-from linecare import config, db
+from linecare import config, db, handover_queue
 from linecare.agents.customer import run_customer_turn
+from linecare.agents.helpdesk import run_assist, run_helpdesk_turn
 from linecare.agents.loop import llm_client
 from linecare.kb import retriever
 from linecare.language import detect_language
 from linecare.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
 from linecare.session import Session
+from linecare.staff import OPERATOR, StaffSession, role_for_token
 from linecare.voice.speech_text import clean_for_speech
 from linecare.voice.stt import transcribe_audio
 from linecare.voice.tts import make_tts
@@ -43,7 +45,16 @@ async def lifespan(_app: FastAPI):
     threading.Thread(target=ensure_default_model_on_startup, daemon=True).start()
     # Build or update the KB index (embedding model download on the very first start) without blocking the page.
     threading.Thread(target=_warm_kb, daemon=True).start()
+    # Cases that could not be written while the CRM was down (kept in the handover summaries).
+    threading.Thread(target=_sync_pending_cases, daemon=True).start()
     yield
+
+
+def _sync_pending_cases():
+    try:
+        handover_queue.sync_pending_cases()
+    except Exception:
+        log.exception("Retrying pending CRM writes failed")
 
 
 def _warm_kb():
@@ -274,3 +285,196 @@ def select_model(model: str = Form(...)):
         return JSONResponse({"error_code": "busy", "message": "Try again in a moment."}, status_code=409)
     result = switch_model(model)
     return JSONResponse(result, status_code=200 if result["status"] == "success" else 500)
+
+
+# --- staff: operator console and helpdesk chat (demo authentication with a token per role) ----------------------
+
+STAFF_COOKIE = "linecare_staff"
+# cookie id -> {"staff": StaffSession, "busy": threading.Lock}; one chat turn or assist job at a time per session.
+staff_sessions: "OrderedDict[str, dict]" = OrderedDict()
+
+
+class StaffLogin(BaseModel):
+    token: str = Field(..., min_length=1, max_length=200)
+
+
+class StaffChatRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=config.MAX_MESSAGE_CHARS)
+
+
+class CloseRequest(BaseModel):
+    note: str = Field(..., min_length=1, max_length=2000)
+
+
+def _new_staff(role: str, cookie: str) -> dict:
+    staff = StaffSession(conv_id=db.new_conversation("helpdesk", model_state["active"]),
+                         staff_id=f"{role}-{cookie[:6]}", role=role)
+    return {"staff": staff, "busy": threading.Lock()}
+
+
+def staff_entry(request: Request, role: str | None = None) -> dict:
+    entry = staff_sessions.get(request.cookies.get(STAFF_COOKIE))
+    if entry is None:
+        raise HTTPException(401, {"error_code": "login_required", "message": "Sign in with a staff token."})
+    if role and entry["staff"].role != role:
+        raise HTTPException(403, {"error_code": "forbidden", "message": f"This needs the {role} role."})
+    return entry
+
+
+def staff_reply(payload: dict, status_code: int = 200, cookie: str = None) -> JSONResponse:
+    response = JSONResponse(payload, status_code=status_code)
+    if cookie:
+        response.set_cookie(STAFF_COOKIE, cookie, httponly=True, samesite="lax")
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_error(_request: Request, exc: HTTPException):
+    detail = exc.detail if isinstance(exc.detail, dict) else {"error_code": "error", "message": str(exc.detail)}
+    return JSONResponse(detail, status_code=exc.status_code)
+
+
+@app.post("/api/staff/login")
+def staff_login(body: StaffLogin):
+    role = role_for_token(body.token)
+    if role is None:
+        return staff_reply({"error_code": "bad_token", "message": "Unknown staff token."}, 401)
+    cookie = uuid.uuid4().hex
+    staff_sessions[cookie] = _new_staff(role, cookie)
+    while len(staff_sessions) > config.MAX_SESSIONS:
+        staff_sessions.popitem(last=False)
+    staff = staff_sessions[cookie]["staff"]
+    return staff_reply({"role": role, "staff_id": staff.staff_id}, cookie=cookie)
+
+
+@app.get("/api/staff/me")
+def staff_me(request: Request):
+    staff = staff_entry(request)["staff"]
+    return {"role": staff.role, "staff_id": staff.staff_id, "handover_id": staff.handover_id}
+
+
+@app.post("/api/staff/logout")
+def staff_logout(request: Request):
+    staff_sessions.pop(request.cookies.get(STAFF_COOKIE), None)
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie(STAFF_COOKIE)
+    return response
+
+
+@app.get("/api/operator/handovers")
+def operator_handovers(request: Request, status: str | None = None):
+    staff_entry(request, OPERATOR)
+    if status not in (None, "queued", "claimed", "closed"):
+        return staff_reply({"error_code": "bad_status", "message": "status: queued, claimed or closed"}, 400)
+    return {"handovers": handover_queue.list_handovers(status)}
+
+
+def _assist_job(entry: dict, handover_id: str, model: str) -> None:
+    global active_turns
+    card = None
+    with entry["busy"]:
+        active_turns += 1
+        try:
+            card = run_assist(entry["staff"], handover_id, model)
+        except Exception:
+            log.exception("Assist for %s failed", handover_id)
+        finally:
+            active_turns -= 1
+    handover_queue.assist_finished(handover_id, card)
+
+
+@app.post("/api/operator/handovers/{handover_id}/claim")
+def operator_claim(handover_id: str, request: Request):
+    entry = staff_entry(request, OPERATOR)
+    if entry["busy"].locked():
+        return staff_reply({"error_code": "busy", "message": "Wait for the current reply first."}, 409)
+    try:
+        handover_queue.claim(handover_id, entry["staff"].staff_id)
+    except handover_queue.QueueError as e:
+        return staff_reply({"error_code": e.code, "message": e.message}, 404 if e.code == "not_found" else 409)
+    entry["staff"].handover_id = handover_id
+    db.audit(entry["staff"].staff_id, OPERATOR, "claim_handover", None, handover_id)
+    handover_queue.assist_started(handover_id)
+    # The claim returns at once; the assist (10-30 s on Gemma) runs in the background and the UI polls for it.
+    threading.Thread(target=_assist_job, args=(entry, handover_id, model_state["active"]), daemon=True).start()
+    return {"handover_id": handover_id, "status": "claimed", "assist": "pending"}
+
+
+@app.get("/api/operator/handovers/{handover_id}/assist")
+def operator_assist(handover_id: str, request: Request):
+    staff_entry(request, OPERATOR)
+    assist = handover_queue.get_assist(handover_id)
+    if assist is None:
+        return staff_reply({"error_code": "not_found", "message": "No assist for this handover."}, 404)
+    return assist
+
+
+@app.post("/api/operator/handovers/{handover_id}/close")
+def operator_close(handover_id: str, body: CloseRequest, request: Request):
+    entry = staff_entry(request, OPERATOR)
+    try:
+        result = handover_queue.close(handover_id, entry["staff"], body.note)
+    except handover_queue.QueueError as e:
+        return staff_reply({"error_code": e.code, "message": e.message}, 404 if e.code == "not_found" else 409)
+    except Exception:
+        log.exception("Closing %s failed", handover_id)
+        return staff_reply({"error_code": "crm_unavailable", "message": "The CRM is not reachable; try again."}, 503)
+    if entry["staff"].handover_id == handover_id:
+        entry["staff"].handover_id = None
+    return result
+
+
+def ui_staff_call(call: dict) -> dict:
+    entry = {"name": call["name"], "status": call["status"], "summary": call["summary"]}
+    if call["name"] == "search_kb" and call["status"] == "ok":
+        entry["sources"] = [{"doc_id": p["doc_id"], "section": p["section"], "title": p["title"],
+                             "audience": p["audience"], "text": PASSAGE_WRAPPER.sub("", p["text"])}
+                            for p in call["result"]["passages"]]
+    return entry
+
+
+@app.post("/api/helpdesk/chat")
+def helpdesk_chat(body: StaffChatRequest, request: Request):
+    global active_turns
+    entry = staff_entry(request)
+    if model_state["switching"]:
+        return staff_reply({"error_code": "switching", "message": "The model is switching; try again in a minute."},
+                           409)
+    if not entry["busy"].acquire(blocking=False):
+        return staff_reply({"error_code": "busy", "message": "Wait for the current reply (or the assist) first."},
+                           409)
+    active_turns += 1
+    try:
+        result = run_helpdesk_turn(entry["staff"], body.text.strip(), model_state["active"])
+    except (APIConnectionError, APITimeoutError):
+        log.error("LM Studio is not reachable at %s", config.LLM_BASE_URL)
+        return staff_reply({"error_code": "llm_unavailable", "message": "The AI model is not reachable."}, 503)
+    except Exception:
+        log.exception("Helpdesk turn failed")
+        return staff_reply({"error_code": "internal", "message": "Something went wrong; try again."}, 500)
+    finally:
+        active_turns -= 1
+        entry["busy"].release()
+    return {"reply": result.reply, "tool_calls": [ui_staff_call(c) for c in result.tool_calls],
+            "model": model_state["active"], "role": entry["staff"].role}
+
+
+@app.post("/api/helpdesk/reset")
+def helpdesk_reset(request: Request):
+    cookie = request.cookies.get(STAFF_COOKIE)
+    entry = staff_entry(request)
+    if entry["busy"].locked():
+        return staff_reply({"error_code": "busy", "message": "Wait for the current reply first."}, 409)
+    staff_sessions[cookie] = _new_staff(entry["staff"].role, cookie)
+    return {"status": "ok"}
+
+
+@app.get("/api/conversations/{conv_id}")
+def conversation(conv_id: str, request: Request):
+    """Transcript and tool calls of a conversation (stored redacted), for staff."""
+    staff = staff_entry(request)["staff"]
+    record = db.conversation_log(conv_id)
+    if record["conversation"] is None:
+        return staff_reply({"error_code": "not_found", "message": "No such conversation."}, 404)
+    db.audit(staff.staff_id, staff.role, "read_conversation", record["conversation"]["account_no"], conv_id)
+    return record
