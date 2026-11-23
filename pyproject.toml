@@ -12,3 +12,4 @@ ignore = ["B008"]
 # wrapping would make it harder to review what the model actually sees. The agent loop itself is checked.
 "linecare/agents/prompts.py" = ["E501"]
 "linecare/tool_schemas.py" = ["E501"]
+"evals/run_evals.py" = ["E501"]
