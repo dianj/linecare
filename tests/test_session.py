@@ -14,6 +14,14 @@ def test_successful_verification_fills_the_session(new_session):
     assert session.state == VERIFIED and session.account_no == "QN-100003" and session.area_code == "PLD-01"
 
 
+def test_a_suspended_account_points_the_model_to_the_bill(new_session):
+    # Found by the evals: Gemma asked "shall I check your bill?" instead of calling get_bill_status.
+    sofia = DEMO_BY_ACCOUNT["QN-100006"]
+    result = verify_customer(new_session(), sofia.account_no, pin=sofia.pin)
+    assert result["account_status"] == "suspended" and "Call get_bill_status now" in result["next_step"]
+    assert "next_step" not in verify_customer(new_session(), MARIA.account_no, pin=MARIA.pin)
+
+
 def test_date_of_birth_works_instead_of_the_pin(new_session):
     session = new_session()
     assert verify_customer(session, "QN-100003", dob=MARIA.dob)["verified"] is True
@@ -112,3 +120,15 @@ def test_the_state_block_has_facts_but_no_secrets(verified):
     assert "identity: verified" in block and "Мария" in block and "Fiber 500" in block
     assert "Restart the customer's QN-Box 4" in block and "Friday 2026-11-20 10:00" in block
     assert MARIA.pin not in block and MARIA.dob not in block and "Demo Street" not in block
+
+
+def test_after_a_fix_the_state_block_asks_for_the_outcome(verified):
+    # Found by the evals: after "it works now" Gemma asked "may I record this as resolved?" instead of recording it.
+    session = verified("QN-100007")
+    assert "call record_outcome" not in session.state_block()
+    session.record_fix("guided_steps")
+    assert "call record_outcome" not in session.state_block()  # not before the customer could answer
+    session.begin_turn()
+    assert "call record_outcome at once" in session.state_block()
+    session.outcome = "resolved"
+    assert "call record_outcome" not in session.state_block()

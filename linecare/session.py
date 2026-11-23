@@ -148,4 +148,8 @@ class Session:
         for action in self.pending.values():
             lines.append(f"waiting for the customer's answer to: {action.summary} "
                          f"(confirmation_id {action.confirmation_id})")
+        if any(f["turn"] < self.turn for f in self.fixes) and self.outcome is None and self.state != HANDED_OVER:
+            # Found by the evals: after "it works now" Gemma asked "may I record this as resolved?" instead.
+            lines.append("a fix was tried: when the customer says whether it works, call record_outcome at once "
+                         "(do not ask permission to record it)")
         return "\n".join(f"- {line}" for line in lines)

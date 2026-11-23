@@ -35,7 +35,12 @@ def verify_customer(session, account_no: str, pin: str = None, dob: str = None) 
     customer = systems.get_customer(account)
     if customer is not None and systems.verify(account, pin=pin, dob=dob):
         session.mark_verified(customer)
-        return ok(verified=True, first_name=customer["first_name"], account_status=customer["status"])
+        result = ok(verified=True, first_name=customer["first_name"], account_status=customer["status"])
+        if customer["status"] == "suspended":
+            # Found by the evals: Gemma asked "shall I check your bill?" instead of checking it.
+            result["next_step"] = ("The account is suspended. Call get_bill_status now, in this turn, and explain "
+                                   "the overdue balance; no technical tests are needed.")
+        return result
     # The same answer for an unknown account and a wrong PIN, so the tool cannot be used to probe accounts.
     if session.record_failed_attempt():
         return blocked("identity_locked", "Verification failed too many times; identity checks are locked for "

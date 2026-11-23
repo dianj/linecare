@@ -84,6 +84,8 @@ def test_a_line_fault_gets_a_visit_in_two_steps(verified):
     create_case(session, "internet_down", "Line degraded")
     offer = run(session, "book_technician")
     assert offer["status"] == "ok" and len(offer["slots"]) == 3
+    # Found by the evals: the customer said "the earliest is fine", yet Gemma listed the windows and asked again.
+    assert "already said which window they want" in offer["message"]
     first = offer["slots"][0]
     assert first == {"slot_id": "SL-SOF-01-1121-08", "label": "Saturday 2026-11-21, 08:00-10:00"}
 

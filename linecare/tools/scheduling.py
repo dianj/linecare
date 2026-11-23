@@ -55,8 +55,10 @@ def book_technician(session, slot_id: str = None, confirmation_id: str = None) -
         if not slots:
             return blocked("no_slots", "There are no free windows in the next two weeks. Offer a colleague.")
         return ok(slots=[{"slot_id": s["slot_id"], "label": slot_label(s)} for s in slots],
-                  message="Offer these windows (day and time only, not the slot ids). When the customer picks one, "
-                          "call book_technician with its slot_id.")
+                  message="If the customer already said which window they want (for example 'the earliest'), "
+                          "call book_technician with that slot_id now, in this turn: it prepares the offer you "
+                          "then ask them to confirm. Otherwise offer these windows (day and time only, not the "
+                          "slot ids) and, when they pick one, call book_technician with its slot_id.")
     slot = systems.get_slot(slot_id)
     if (slot is None or slot["area_code"] != session.area_code or slot["booked"] >= slot["capacity"]
             or slot["start"] <= clock.now().isoformat()):
