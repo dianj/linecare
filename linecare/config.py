@@ -27,6 +27,40 @@ MAX_HISTORY_TURNS = 16  # older user turns are dropped (whole turns, so tool-cal
 # --- Storage ---
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "data" / "linecare.db"))
 
+# --- Knowledge base (see linecare/kb/) ---
+KB_DIR = BASE_DIR / "kb"
+CHROMA_PATH = Path(os.environ.get("CHROMA_PATH", BASE_DIR / "data" / "chroma"))
+EMBEDDER = os.environ.get("EMBEDDER", "onnx")  # onnx | fake
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+EMBED_CACHE_DIR = Path(os.environ.get("EMBED_CACHE_DIR", BASE_DIR / "data" / "fastembed"))
+# Relevance threshold for `answerable`. Empty = the value calibrated for the embedding model (kb/embedder.py).
+KB_MIN_SCORE = float(os.environ["KB_MIN_SCORE"]) if os.environ.get("KB_MIN_SCORE") else None
+# 1 = also index kb/test (the poisoned PUB-99 used by injection tests); never in the demo index.
+KB_INCLUDE_TEST_DOCS = os.environ.get("KB_INCLUDE_TEST_DOCS", "0") == "1"
+KB_TOP_K = 4
+
+# --- Voice (see linecare/voice/) ---
+# Speech-to-text runs locally on the CPU; the GPU is kept for the chat model.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+MAX_AUDIO_BYTES = 15 * 1024 * 1024
+VOICE_LANGUAGES = ("en", "bg")
+WHISPER_PROMPTS = {
+    "en": "Quillnet support: account number QN-100042, router, QN-Box 4, QN-Mesh Duo, Wi-Fi, PPPoE, outage, "
+          "technician, bill.",
+    "bg": "Поддръжка на Quillnet: номер на акаунт QN-100042, рутер, QN-Box 4, QN-Mesh Duo, Wi-Fi, авария, техник, "
+          "сметка, интернет.",
+}
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge")  # edge | fake (elevenlabs in D4)
+# edge-tts uses Microsoft's online neural voices, so reply text leaves the machine.
+TTS_VOICES = {
+    "female": {"en": "en-US-AvaNeural", "bg": "bg-BG-KalinaNeural"},
+    "male": {"en": "en-US-AndrewNeural", "bg": "bg-BG-BorislavNeural"},
+}
+DEFAULT_VOICE_GENDER = "female"
+MAX_TTS_CHARS = 1200
+TTS_ATTEMPTS = 3
+TTS_ATTEMPT_TIMEOUT = 15
+
 # --- Clock ---
 # An ISO datetime freezes "now" for tests, evals and a repeatable demo. Empty = the real clock.
 FROZEN_NOW = os.environ.get("FROZEN_NOW", "")

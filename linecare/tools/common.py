@@ -45,3 +45,17 @@ def two_step(session, tool: str, arguments: dict, summary: str, confirmation_id,
         return blocked(reason, "This confirmation is unknown or has expired. Call the tool without "
                                "confirmation_id to make a new offer, and ask the customer.")
     return execute(action.arguments)
+
+
+# A conversation's outcome only moves up this list: a booked visit stays the outcome even if the customer later
+# says thanks, and a handover wins over everything.
+OUTCOME_RANK = ["info", "resolved", "case_created", "technician_booked", "handover"]
+
+
+def set_outcome(session, outcome: str) -> None:
+    from linecare import db  # here, not at the top: db is not needed by the pure helpers above
+
+    current = session.logged_outcome
+    if current is None or OUTCOME_RANK.index(outcome) > OUTCOME_RANK.index(current):
+        session.logged_outcome = outcome
+        db.update_conversation(session.conv_id, outcome=outcome)

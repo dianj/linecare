@@ -176,6 +176,12 @@ def free_slots(area_code: str, days: int = 14, limit: int = 3) -> list[dict]:
     return [{"slot_id": r["slot_id"], "start": r["start"], "end": r["end"]} for r in rows]
 
 
+def get_slot(slot_id: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM sys_tech_slots WHERE slot_id = ?", (str(slot_id).strip().upper(),)).fetchone()
+    return dict(row) if row else None
+
+
 def book_appointment(account_no: str, slot_id: str, reason: str, case_ref: str = None) -> dict | None:
     with connect() as conn:
         slot = conn.execute("SELECT * FROM sys_tech_slots WHERE slot_id = ?", (slot_id,)).fetchone()

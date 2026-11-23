@@ -32,16 +32,32 @@
     .tool::before { content: "●"; margin-right: 5px; color: var(--ok); }
     .tool.blocked::before, .tool.needs_confirmation::before { color: var(--warn); }
     .tool.error::before, .tool.system_error::before { color: var(--bad); }
+    .sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
+    .source { font-size: 12px; background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+    .source[aria-expanded="true"] { background: var(--accent); color: var(--accent-ink); }
+    .passage { margin-top: 8px; padding: 10px 12px; border-left: 3px solid var(--accent); background: #0b1015; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+    .passage strong { display: block; margin-bottom: 4px; color: var(--muted); font-weight: 600; }
+    .quick { display: flex; gap: 8px; margin-top: 10px; }
     form { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); }
     textarea { flex: 1; resize: none; height: 52px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; }
     .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 0 18px; font-weight: 600; cursor: pointer; }
     .primary:disabled { opacity: .5; cursor: wait; }
+    #mic { width: 52px; flex: none; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 20px; cursor: pointer; }
+    #mic.recording { background: var(--bad); border-color: var(--bad); animation: pulse 1.2s infinite; }
+    #mic:disabled { opacity: .45; cursor: not-allowed; animation: none; }
+    @keyframes pulse { 50% { opacity: .6; } }
+    .voicebar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 20px 0; color: var(--muted); font-size: 13px; }
+    .voicebar select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
+    #hint { min-height: 1em; }
     aside { padding: 20px; overflow-y: auto; background: var(--panel); }
     aside h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
     .state { display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px; font-size: 14px; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
     .badge.verified { border-color: var(--ok); color: var(--ok); }
     .badge.locked { border-color: var(--bad); color: var(--bad); }
+    .badge.handed_over { border-color: var(--warn); color: var(--warn); }
+    .fact { color: var(--text); }
+    .fact span { color: var(--muted); }
     .pending { color: var(--warn); }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -62,7 +78,21 @@
             <button class="ghost" id="newChat" type="button">New conversation</button>
         </header>
         <div id="messages" aria-live="polite"></div>
+        <div class="voicebar">
+            <label><input type="checkbox" id="voiceReplies"> Voice replies</label>
+            <select id="voiceGender" aria-label="Voice">
+                <option value="female">Female voice</option>
+                <option value="male">Male voice</option>
+            </select>
+            <select id="speechLanguage" aria-label="Speech language">
+                <option value="auto">Speech: auto</option>
+                <option value="en">Speech: English</option>
+                <option value="bg">Speech: Български</option>
+            </select>
+            <span id="hint" aria-live="polite"></span>
+        </div>
         <form id="composer">
+            <button id="mic" type="button" title="Record a voice message" aria-label="Record a voice message">🎤</button>
             <textarea id="input" aria-label="Message" placeholder="Describe the problem… (Enter to send, Shift+Enter for a new line)"></textarea>
             <button class="primary" id="send" type="submit">Send</button>
         </form>
@@ -82,6 +112,11 @@
 const messages = document.getElementById('messages');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const mic = document.getElementById('mic');
+const hint = document.getElementById('hint');
+const player = new Audio();
+const MAX_RECORD_MS = 30000;
+let recorder = null, chunks = [], recordTimer = null;
 
 // Every model or user text is set with textContent: nothing from the conversation is parsed as HTML.
 function el(tag, className, text) {
@@ -89,6 +124,58 @@ function el(tag, className, text) {
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
+}
+
+// Source chips come from the search_help tool results, not from the model's text (spec §8.5).
+function addSources(bubble, toolCalls) {
+    const seen = new Set();
+    const sources = [];
+    for (const call of toolCalls || []) {
+        for (const source of call.sources || []) {
+            const key = `${source.doc_id} §${source.section}`;
+            if (!seen.has(key)) { seen.add(key); sources.push([key, source]); }
+        }
+    }
+    if (!sources.length) return;
+    const row = el('div', 'sources');
+    let open = null;
+    for (const [key, source] of sources) {
+        const chip = el('button', 'source', key);
+        chip.type = 'button';
+        chip.setAttribute('aria-expanded', 'false');
+        chip.addEventListener('click', () => {
+            if (open) { open.panel.remove(); open.chip.setAttribute('aria-expanded', 'false'); }
+            if (open && open.chip === chip) { open = null; return; }
+            const panel = el('div', 'passage');
+            panel.appendChild(el('strong', '', `${source.title} · ${source.section}`));
+            panel.appendChild(document.createTextNode(source.text));
+            bubble.appendChild(panel);
+            chip.setAttribute('aria-expanded', 'true');
+            open = {chip, panel};
+        });
+        row.appendChild(chip);
+    }
+    bubble.appendChild(row);
+}
+
+const QUICK_REPLIES = {en: ['Yes, go ahead', 'No'], bg: ['Да, давай', 'Не']};
+
+// Shortcut buttons for a pending confirmation. They only send a normal message: the confirmation itself is still
+// checked in code (it must come in a later turn than the offer).
+function addQuickReplies(bubble, state) {
+    if (!state || !(state.pending || []).length) return;
+    const row = el('div', 'quick');
+    for (const label of QUICK_REPLIES[state.language] || QUICK_REPLIES.en) {
+        const button = el('button', 'ghost', label);
+        button.type = 'button';
+        button.addEventListener('click', () => {
+            if (send.disabled) return;
+            row.remove();
+            sendMessage(label);
+        });
+        row.appendChild(button);
+    }
+    bubble.appendChild(row);
 }
 
 function addMessage(role, text, toolCalls, isError) {
@@ -102,6 +189,7 @@ function addMessage(role, text, toolCalls, isError) {
             tools.appendChild(chip);
         }
         bubble.appendChild(tools);
+        addSources(bubble, toolCalls);
     }
     messages.appendChild(bubble);
     messages.scrollTop = messages.scrollHeight;
@@ -115,6 +203,15 @@ function renderState(state) {
     identity.appendChild(el('span', `badge ${state.identity}`, state.identity));
     if (state.first_name) identity.appendChild(document.createTextNode(` ${state.first_name}`));
     box.appendChild(identity);
+    const facts = [['Case', state.case_ref], ['Technician', state.appointment], ['Handover', state.handover_id],
+                   ['Customer says', state.outcome && state.outcome.replace('_', ' ')]];
+    for (const [label, value] of facts) {
+        if (!value) continue;
+        const fact = el('div', 'fact');
+        fact.appendChild(el('span', '', `${label}: `));
+        fact.appendChild(document.createTextNode(value));
+        box.appendChild(fact);
+    }
     for (const pending of state.pending || []) box.appendChild(el('div', 'pending', `Waiting for an answer: ${pending}`));
 }
 
@@ -131,26 +228,102 @@ async function loadDemo() {
     }
 }
 
-async function sendMessage(text) {
-    addMessage('user', text);
-    send.disabled = true;
-    const typing = addMessage('bot typing', 'LineCare is checking…');
+function setBusy(busy, text) {
+    send.disabled = busy;
+    mic.disabled = busy && !recorder;
+    hint.textContent = text || '';
+}
+
+// One request for typed text (JSON) or a recording (multipart); the reply is shown the same way.
+async function postTurn(request, typingText) {
+    const typing = addMessage('bot typing', typingText);
+    setBusy(true);
     try {
-        const response = await fetch('/api/customer/chat', {
-            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}),
-        });
+        const response = await fetch(request.url, request.options);
         const data = await response.json();
         typing.remove();
         if (!response.ok) { addMessage('bot', data.message || 'Something went wrong.', [], true); return; }
-        addMessage('bot', data.reply, data.tool_calls, data.system_error);
+        // A recording: show what was heard as the customer's message.
+        if (data.user_text) messages.appendChild(el('div', 'msg user', `🎤 ${data.user_text}`));
+        const bubble = addMessage('bot', data.reply, data.tool_calls, data.system_error);
         renderState(data.state);
+        addQuickReplies(bubble, data.state);
+        if (document.getElementById('voiceReplies').checked && !data.system_error) {
+            speak(data.reply, data.spoken_language || data.state.language);
+        }
     } catch (e) {
         typing.remove();
         addMessage('bot', 'The server is not reachable.', [], true);
     } finally {
-        send.disabled = false;
+        setBusy(false);
         input.focus();
     }
+}
+
+function sendMessage(text) {
+    addMessage('user', text);
+    postTurn({url: '/api/customer/chat', options: {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}),
+    }}, 'LineCare is checking…');
+}
+
+// --- Voice input: click to start, click again to send ---
+mic.addEventListener('click', async () => {
+    if (recorder) { recorder.stop(); return; }
+    if (send.disabled) return;
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    } catch {
+        hint.textContent = 'Microphone access was blocked. Allow it in the browser, or type instead.';
+        return;
+    }
+    player.pause();
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    recorder.onstop = () => {
+        clearTimeout(recordTimer);
+        stream.getTracks().forEach((track) => track.stop());  // release the microphone
+        const type = recorder.mimeType || 'audio/webm';
+        recorder = null;
+        mic.classList.remove('recording');
+        const blob = new Blob(chunks, {type});
+        if (blob.size < 1000) { setBusy(false, 'The recording was too short.'); return; }
+        const form = new FormData();
+        form.append('audio', blob, type.includes('ogg') ? 'speech.ogg' : 'speech.webm');
+        form.append('language', document.getElementById('speechLanguage').value);
+        postTurn({url: '/api/customer/voice', options: {method: 'POST', body: form}}, 'Listening and checking…');
+    };
+    recorder.start();
+    mic.classList.add('recording');
+    setBusy(true, 'Recording… click the microphone again to send.');
+    mic.disabled = false;
+    recordTimer = setTimeout(() => recorder && recorder.stop(), MAX_RECORD_MS);
+});
+
+// --- Voice output ---
+async function speak(text, language) {
+    player.pause();
+    const form = new FormData();
+    form.append('text', text);
+    form.append('language', language || 'en');
+    form.append('gender', document.getElementById('voiceGender').value);
+    try {
+        const response = await fetch('/api/tts', {method: 'POST', body: form});
+        if (!response.ok) { hint.textContent = 'Voice reply is not available right now.'; return; }
+        player.src = URL.createObjectURL(await response.blob());
+        await player.play();
+    } catch {
+        hint.textContent = 'Voice reply could not be played.';
+    }
+}
+
+for (const key of ['voiceReplies', 'voiceGender', 'speechLanguage']) {
+    const node = document.getElementById(key);
+    const saved = localStorage.getItem(key);
+    if (saved !== null) node.type === 'checkbox' ? (node.checked = saved === 'true') : (node.value = saved);
+    node.addEventListener('change', () => localStorage.setItem(key, node.type === 'checkbox' ? node.checked : node.value));
 }
 
 document.getElementById('composer').addEventListener('submit', (event) => {

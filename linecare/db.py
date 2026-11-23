@@ -46,6 +46,47 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     result_summary TEXT,
     ms INTEGER
 );
+CREATE TABLE IF NOT EXISTS handovers (
+    handover_id TEXT PRIMARY KEY,
+    conv_id TEXT NOT NULL REFERENCES conversations(conv_id),
+    account_no TEXT,
+    created_at TEXT NOT NULL,
+    priority TEXT NOT NULL CHECK (priority IN ('normal', 'high')),
+    reason TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'claimed', 'closed')),
+    claimed_by TEXT,
+    closed_at TEXT
+);
+-- FakeCRM: the fields LineCare uses of Salesforce Contact, Case and CaseComment (spec section 9).
+CREATE TABLE IF NOT EXISTS crm_contacts (
+    contact_id TEXT PRIMARY KEY,
+    account_no TEXT NOT NULL UNIQUE,
+    first_name TEXT,
+    last_name TEXT
+);
+CREATE TABLE IF NOT EXISTS crm_cases (
+    case_ref TEXT PRIMARY KEY,
+    contact_id TEXT NOT NULL REFERENCES crm_contacts(contact_id),
+    account_no TEXT NOT NULL,
+    category TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    description TEXT,
+    diagnostics TEXT,
+    status TEXT NOT NULL DEFAULT 'New',
+    origin TEXT NOT NULL DEFAULT 'Chat',
+    priority TEXT NOT NULL DEFAULT 'Medium',
+    handover_id TEXT,
+    created_at TEXT NOT NULL,
+    closed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS crm_case_comments (
+    comment_id TEXT PRIMARY KEY,
+    case_ref TEXT NOT NULL REFERENCES crm_cases(case_ref),
+    body TEXT NOT NULL,
+    is_public INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
 

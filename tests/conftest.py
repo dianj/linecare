@@ -25,6 +25,9 @@ FROZEN_NOW = "2026-11-20T10:00:00"  # a Friday
 os.environ["DB_PATH"] = os.path.join(_TMP_DIR, "linecare.db")
 os.environ["LLM_BASE_URL"] = _FAKE.base_url
 os.environ["FROZEN_NOW"] = FROZEN_NOW
+os.environ["EMBEDDER"] = "fake"  # hashing embedder: tests the wiring and the filters, not retrieval quality
+os.environ["CHROMA_PATH"] = os.path.join(_TMP_DIR, "chroma")
+os.environ["KB_INCLUDE_TEST_DOCS"] = "0"
 
 from linecare import config, db  # noqa: E402  (must come after the environment is prepared)
 from mocks.scenarios import DEMO_BY_ACCOUNT  # noqa: E402

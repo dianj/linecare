@@ -9,10 +9,15 @@ import logging
 
 from linecare.session import HANDED_OVER, LOCKED, VERIFIED
 from linecare.tools.billing import get_bill_status
+from linecare.tools.cases import create_case
 from linecare.tools.common import blocked, error
 from linecare.tools.diagnostics import get_router_status, reboot_router, run_line_test, scan_wifi
+from linecare.tools.handover import handover_to_human
 from linecare.tools.identity import verify_customer
+from linecare.tools.kb import search_help
 from linecare.tools.network import check_outage
+from linecare.tools.outcome import record_outcome
+from linecare.tools.scheduling import book_technician
 
 log = logging.getLogger("linecare.registry")
 
@@ -24,6 +29,11 @@ CUSTOMER_FUNCTIONS = {
     "reboot_router": reboot_router,
     "scan_wifi": scan_wifi,
     "get_bill_status": get_bill_status,
+    "search_help": search_help,
+    "create_case": create_case,
+    "book_technician": book_technician,
+    "handover_to_human": handover_to_human,
+    "record_outcome": record_outcome,
 }
 ALLOWED = {"customer": CUSTOMER_FUNCTIONS}
 

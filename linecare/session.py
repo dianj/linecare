@@ -40,11 +40,22 @@ class Session:
     router_model: str | None = None
     account_status: str | None = None
     message_language: str = "en"                     # language of the latest customer message
+    channel: str = "chat"                            # of the latest message: chat or voice
     failed_attempts: int = 0
     locked_until: datetime | None = None
     turn: int = 0
     reboots: int = 0
-    fixes: list = field(default_factory=list)        # fixing actions that succeeded (for record_outcome, D2)
+    fixes: list = field(default_factory=list)        # fixing actions that succeeded: {"tool", "turn"}
+    tool_log: list = field(default_factory=list)     # ok results as short lines: {"tool", "result", "turn"}
+    diagnostics: dict = field(default_factory=dict)  # latest ok result per diagnostic tool (technician policy)
+    kb_sources: list = field(default_factory=list)   # "PUB-02 §2. The 2.4 GHz and 5 GHz bands"
+    open_case_ref: str | None = None
+    case_category: str | None = None
+    appointment: dict | None = None
+    handover_id: str | None = None
+    outcome: str | None = None                       # the customer's answer via record_outcome
+    logged_outcome: str | None = None                # conversations.outcome in the database
+    pending_crm_sync: bool = False                   # a case could not be written to the CRM
     pending: dict = field(default_factory=dict)      # confirmation_id -> PendingAction
     secrets: set = field(default_factory=set)        # raw PINs / dates passed to verify_customer
     identity_phase_upto: int = 0                     # history index: user messages before it were sent unverified
@@ -87,6 +98,10 @@ class Session:
         self.router_model = customer["router_model"]
         self.account_status = customer["status"]
 
+    def record_fix(self, tool: str) -> None:
+        """A fixing action succeeded (restart, guided steps); record_outcome may be used from the next turn."""
+        self.fixes.append({"tool": tool, "turn": self.turn})
+
     # --- confirmations -------------------------------------------------------------------
     def create_pending(self, tool: str, arguments: dict, summary: str) -> PendingAction:
         """A new offer replaces an earlier pending offer for the same tool."""
@@ -112,6 +127,9 @@ class Session:
                  f"the customer's latest message is in {LANGUAGE_NAMES[self.message_language]}: reply in "
                  f"{LANGUAGE_NAMES[self.message_language]}",
                  f"identity: {self.state.lower()}"]
+        if self.channel == "voice":
+            lines.append("channel: voice (the reply is spoken): at most two short sentences, no lists, no ids "
+                         "read in full")
         if self.verified:
             lines += [f"customer first name: {self.first_name}", f"account status: {self.account_status}",
                       f"plan: {self.plan_name}",
@@ -121,6 +139,12 @@ class Session:
             lines.append(f"verification attempts left: {self.attempts_left()}")
         elif self.state == LOCKED:
             lines.append(f"identity checks locked until {self.locked_until:%H:%M}")
+        elif self.state == HANDED_OVER:
+            lines.append(f"handed over to a colleague ({self.handover_id}): take no further actions")
+        if self.open_case_ref:
+            lines.append(f"open case: {self.open_case_ref} ({self.case_category})")
+        if self.appointment:
+            lines.append(f"technician booked: {self.appointment['label']}")
         for action in self.pending.values():
             lines.append(f"waiting for the customer's answer to: {action.summary} "
                          f"(confirmation_id {action.confirmation_id})")

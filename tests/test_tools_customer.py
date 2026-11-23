@@ -64,7 +64,7 @@ def test_reboot_needs_a_confirmation_in_the_next_turn(verified):
     done = reboot_router(session, confirmation_id=offer["confirmation_id"])
     assert done["status"] == "ok" and done["accepted"] is True
     assert get_router_status(session)["verdict"] == "ok"
-    assert session.reboots == 1 and session.fixes == ["reboot_router"]
+    assert session.reboots == 1 and session.fixes == [{"tool": "reboot_router", "turn": 2}]
 
 
 def test_a_made_up_confirmation_id_does_nothing(verified):

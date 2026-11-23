@@ -37,7 +37,7 @@ def reboot_router(session, confirmation_id: str = None) -> dict:
         if not result["accepted"]:
             return blocked(result["reason"], "The router is restarting already. Wait and check its status.")
         session.reboots += 1
-        session.fixes.append("reboot_router")
+        session.record_fix("reboot_router")
         return ok(accepted=True, back_in_s=result["expected_back_in_s"],
                   message="The restart was started. Check get_router_status before telling the customer it is "
                           "fixed, then ask them whether it works now.")

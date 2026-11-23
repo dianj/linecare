@@ -128,7 +128,7 @@ def test_the_state_reaches_the_model_and_reasoning_is_off(client, fake_lm):
     assert "identity: unverified" in fake_lm.requests[0]["messages"][0]["content"]
     assert "identity: verified" in fake_lm.requests[1]["messages"][0]["content"]  # updated in the same turn
     assert fake_lm.requests[0]["reasoning_effort"] == config.LLM_REASONING_EFFORT == "none"
-    assert len(fake_lm.requests[0]["tools"]) == 7
+    assert len(fake_lm.requests[0]["tools"]) == 12
 
 
 def test_an_llm_outage_returns_a_friendly_message_and_keeps_the_session(client, fake_lm):
@@ -197,3 +197,73 @@ def test_health_and_models(client, fake_lm):
     assert client.post("/api/model", data={"model": "unknown"}).status_code == 400
     switched = client.post("/api/model", data={"model": "qwen3.8-27b"})
     assert switched.status_code == 200 and fake_lm.loaded == {"qwen3.8-27b"}
+
+
+# --- D2: knowledge base, cases, technician, handover ---------------------------------------
+
+ELENA, OLIVER, PETER = DEMO_BY_ACCOUNT["QN-100002"], DEMO_BY_ACCOUNT["QN-100004"], DEMO_BY_ACCOUNT["QN-100007"]
+
+
+def test_s2_line_fault_gets_a_case_and_a_technician(client, fake_lm, fixed_confirmation_ids):
+    fake_lm.script_rounds([("verify_customer", {"account_no": ELENA.account_no, "pin": ELENA.pin})],
+                          [("check_outage", {"service": "internet"})],
+                          [("get_router_status", {}), ("run_line_test", {})],
+                          [("create_case", {"category": "internet_down", "subject": "Line degraded",
+                                            "diagnostics_summary": "SNR 4.1 dB"})],
+                          [("book_technician", {})],
+                          reply="The line has a fault. Case 0000 1001. Free windows: Saturday 08:00-10:00, ...")
+    first = chat(client, f"My internet keeps failing. {ELENA.account_no} PIN {ELENA.pin}")
+    assert [c["status"] for c in first["tool_calls"]] == ["ok"] * 6
+    assert first["state"]["case_ref"] == "00001001"
+
+    fake_lm.script_rounds([("book_technician", {"slot_id": "SL-SOF-01-1121-08"})],
+                          reply="Shall I book Saturday 08:00-10:00?")
+    second = chat(client, "Saturday morning please")
+    assert second["tool_calls"][0]["status"] == "needs_confirmation" and second["state"]["appointment"] is None
+
+    fake_lm.script_rounds([("book_technician", {"confirmation_id": fixed_confirmation_ids})],
+                          reply="Booked for Saturday 08:00-10:00.")
+    third = chat(client, "Yes")
+    assert third["tool_calls"][0]["status"] == "ok"
+    assert third["state"]["appointment"] == "Saturday 2026-11-21, 08:00-10:00"
+    log = db.conversation_log(third["state"]["conversation"])
+    assert log["conversation"]["outcome"] == "technician_booked"
+    assert ELENA.pin not in stored_text(third["state"]["conversation"])
+
+
+def test_s4_wifi_tips_come_with_their_sources(client, fake_lm):
+    fake_lm.script_rounds([("verify_customer", {"account_no": OLIVER.account_no, "pin": OLIVER.pin})],
+                          [("check_outage", {"service": "internet"})],
+                          [("scan_wifi", {}), ("search_help", {"query": "slow Wi-Fi use the 5 GHz band"})],
+                          reply="Your 2.4 GHz band is crowded; according to our Wi-Fi guide, use the 5 GHz network.")
+    data = chat(client, f"Wi-Fi is slow, wired is fine. {OLIVER.account_no} {OLIVER.pin}")
+    help_call = next(c for c in data["tool_calls"] if c["name"] == "search_help")
+    assert help_call["status"] == "ok" and help_call["sources"][0]["doc_id"] == "PUB-02"
+    source = help_call["sources"][0]
+    assert "<<passage" not in source["text"] and source["text"] and source["section"]
+    # The model received the wrapped passage, the UI got the plain text.
+    tool_message = next(m for m in fake_lm.requests[-1]["messages"]
+                        if m["role"] == "tool" and "passages" in m["content"])
+    assert "<<passage doc_id=PUB-02" in json.loads(tool_message["content"])["passages"][0]["text"]
+
+
+def test_s7_guided_steps_then_the_customer_confirms_the_fix(client, fake_lm):
+    fake_lm.script_rounds([("verify_customer", {"account_no": PETER.account_no, "pin": PETER.pin})],
+                          [("check_outage", {"service": "internet"})],
+                          [("get_router_status", {}), ("run_line_test", {})],
+                          [("search_help", {"query": "only one device no internet forget the network restart"})],
+                          reply="Your line and router are fine. Please forget the Wi-Fi network on the laptop...")
+    chat(client, f"My laptop has no internet. {PETER.account_no} PIN {PETER.pin}")
+    fake_lm.script_rounds([("record_outcome", {"outcome": "resolved"})], reply="Great, glad it works!")
+    data = chat(client, "That worked, thanks!")
+    assert data["tool_calls"][0]["status"] == "ok" and data["state"]["outcome"] == "resolved"
+    assert db.conversation_log(data["state"]["conversation"])["conversation"]["outcome"] == "resolved"
+
+
+def test_a_human_is_reached_at_once_even_unverified(client, fake_lm):
+    fake_lm.script_rounds([("handover_to_human", {"reason": "customer_request",
+                                                  "customer_view": "Wants to talk to a person."})],
+                          reply="I am connecting you with a colleague; you are number 1 in the queue.")
+    data = chat(client, "I want to talk to a human")
+    assert data["tool_calls"][0]["status"] == "ok"
+    assert data["state"]["identity"] == "handed_over" and data["state"]["handover_id"] == "HO-0001"

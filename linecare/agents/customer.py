@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from linecare import db
 from linecare.agents.loop import run_tool_loop, trim_history
 from linecare.agents.prompts import build_customer_prompt
+from linecare.handover import ACTION_TOOLS, DIAGNOSTIC_TOOLS, describe
 from linecare.language import detect_language
 from linecare.redaction import redact_arguments, redact_history, redact_text
 from linecare.registry import execute_tool_call
@@ -25,19 +26,36 @@ class TurnResult:
     cap_reached: bool = False
 
 
+def _remember(session, name: str, result: dict) -> None:
+    """Keep successful checks and actions for the technician policy and the handover summary."""
+    if result.get("status") != "ok" or name not in DIAGNOSTIC_TOOLS + ACTION_TOOLS + ("search_help",):
+        return
+    if name in DIAGNOSTIC_TOOLS:
+        session.diagnostics[name] = result
+    try:
+        line = describe(name, result)
+    except (KeyError, TypeError):
+        line = "ok"
+    session.tool_log.append({"tool": name, "result": line, "turn": session.turn})
+
+
 def _summary(result: dict) -> str:
     """A short, secret-free line for the audit log."""
-    keys = ("verified", "verdict", "outage_in_area", "account_status", "accepted", "reason", "confirmation_id")
+    keys = ("verified", "verdict", "outage_in_area", "account_status", "accepted", "reason", "confirmation_id",
+            "answerable", "case_ref", "appointment_id", "handover_id", "outcome")
     return ", ".join(f"{k}={result[k]}" for k in keys if k in result) or result.get("status", "")
 
 
-def run_customer_turn(session, text: str, model: str) -> TurnResult:
+def run_customer_turn(session, text: str, model: str, *, channel: str = "chat", stt_ms: int = None) -> TurnResult:
     """Run one customer message. On success the session's history is replaced by the redacted new history.
 
     If the model call fails, the exception propagates and the session history is left as it was.
     """
     session.begin_turn()
     session.message_language = detect_language(text)
+    if channel == "voice" and session.channel != "voice":
+        db.update_conversation(session.conv_id, channel="voice")
+    session.channel = channel
     was_verified = session.verified
     history = list(session.history) + [{"role": "user", "content": text}]
     calls: list = []
@@ -47,6 +65,7 @@ def run_customer_turn(session, text: str, model: str) -> TurnResult:
         nonlocal tools_ms
         started = time.perf_counter()
         result = execute_tool_call("customer", session, name, raw_arguments)
+        _remember(session, name, result)
         tools_ms += int((time.perf_counter() - started) * 1000)
         try:
             arguments = json.loads(raw_arguments or "{}")
@@ -78,7 +97,7 @@ def run_customer_turn(session, text: str, model: str) -> TurnResult:
     session.history = trimmed
 
     user_text = redact_text(text, session.secrets, identity_phase=not was_verified)
-    db.log_turn(session.conv_id, "user", user_text, model)
+    db.log_turn(session.conv_id, "user", user_text, model, stt_ms=stt_ms)
     db.log_turn(session.conv_id, "assistant", redact_text(reply, session.secrets), model, llm_ms=llm_ms,
                 tools_ms=tools_ms, rounds=rounds, tool_calls=calls)
     if session.verified and not was_verified:
