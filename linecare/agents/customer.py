@@ -53,6 +53,8 @@ def run_customer_turn(session, text: str, model: str, *, channel: str = "chat", 
     """
     session.begin_turn()
     session.message_language = detect_language(text)
+    session.model = model
+    session.last_user_text = redact_text(text, session.secrets, identity_phase=not session.verified)
     if channel == "voice" and session.channel != "voice":
         db.update_conversation(session.conv_id, channel="voice")
     session.channel = channel

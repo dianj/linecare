@@ -45,6 +45,9 @@ class Session:
     failed_attempts: int = 0
     locked_until: datetime | None = None
     turn: int = 0
+    last_user_text: str = ""                          # this turn's message (redacted), for the confirmation gate
+    model: str | None = None                          # the model answering this turn (the gate asks the same one)
+    decisions: list = field(default_factory=list)     # confirmation-gate records of this conversation
     reboots: int = 0
     fixes: list = field(default_factory=list)        # fixing actions that succeeded: {"tool", "turn"}
     tool_log: list = field(default_factory=list)     # ok results as short lines: {"tool", "result", "turn"}
@@ -68,6 +71,7 @@ class Session:
     def begin_turn(self) -> None:
         """Called once per user message: counts the turn, ends an expired lock, drops stale confirmations."""
         self.turn += 1
+        self.last_user_text = ""
         if self.state == LOCKED and self.locked_until and clock.now() >= self.locked_until:
             self.state, self.failed_attempts, self.locked_until = UNVERIFIED, 0, None
         self.pending = {cid: p for cid, p in self.pending.items()

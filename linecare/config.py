@@ -24,6 +24,11 @@ MODEL_LOAD_TIMEOUT = 600
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "8"))
 MAX_HISTORY_TURNS = 16  # older user turns are dropped (whole turns, so tool-call pairs stay complete)
 
+# --- Confirmation gate (docs/DECISIONS.md): a calibrated check that the customer said yes before an action runs ---
+DECISION_GATE = os.environ.get("DECISION_GATE", "1") == "1"
+CALIBRATION_DIR = BASE_DIR / os.environ.get("CALIBRATION_DIR", "evals/decisions/calibration")
+DECISION_TIMEOUT_SECONDS = float(os.environ.get("DECISION_TIMEOUT_SECONDS", "20"))
+
 # --- Storage ---
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "data" / "linecare.db"))
 

@@ -1,0 +1,20 @@
+{
+  "question_id": "linecare.instruction_in_reply",
+  "model": "qwen3.8-27b",
+  "prompt_hash": "2594ddbe1a23",
+  "temperature": 1.0,
+  "n_cases": 38,
+  "fitted_at": "2026-11-23T23:41:23.905438+00:00",
+  "metrics_before": {
+    "n": 38,
+    "accuracy": 1.0,
+    "ece": 0.0264,
+    "brier": 0.0074
+  },
+  "metrics_after": {
+    "n": 38,
+    "accuracy": 1.0,
+    "ece": 0.0264,
+    "brier": 0.0074
+  }
+}

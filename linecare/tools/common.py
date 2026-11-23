@@ -44,7 +44,39 @@ def two_step(session, tool: str, arguments: dict, summary: str, confirmation_id,
             return blocked(reason, "The customer has not answered yet. Ask them first and wait for their reply.")
         return blocked(reason, "This confirmation is unknown or has expired. Call the tool without "
                                "confirmation_id to make a new offer, and ask the customer.")
+    refusal = confirmation_gate(session, action)
+    if refusal:
+        return refusal
     return execute(action.arguments)
+
+
+def confirmation_gate(session, action) -> dict | None:
+    """The second key: a calibrated check that the customer's latest message agrees to this action. None = go."""
+    from linecare import config, decisions
+    from linecare.decide import Action
+
+    if not config.DECISION_GATE:
+        return None
+    agree, instruction = decisions.decider(session.model).ask_many_sync(
+        [decisions.CONFIRM_ACTION, decisions.INSTRUCTION], session.last_user_text,
+        {"action": action.summary or action.tool})
+    verdict = decisions.confirmation_action(agree, instruction)
+    p_yes = round(agree.probs["yes"], 3) if agree.probs else None
+    for decision in (agree, instruction):
+        session.decisions.append({**decision.record.model_dump(mode="json"), "tool": action.tool,
+                                  "policy_action": verdict.value})
+    if verdict == Action.ACT:
+        return None
+    if verdict == Action.CONFIRM:
+        session.pending[action.confirmation_id] = action          # the offer stays open for the next answer
+        return blocked("confirmation_unclear",
+                       f"Nothing was done: the customer's reply is not a clear yes to \"{action.summary}\". "
+                       "Answer any question they asked, then ask one explicit yes/no question. Call the tool again "
+                       "with the same confirmation_id only after a clear yes.",
+                       confirmation_id=action.confirmation_id, p_yes=p_yes)
+    return blocked("not_confirmed",
+                   "Nothing was done and the offer is cancelled: the customer did not clearly agree. Do not do it. "
+                   "If they ask for it again later, make a new offer.", p_yes=p_yes)
 
 
 # A conversation's outcome only moves up this list: a booked visit stays the outcome even if the customer later

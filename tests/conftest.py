@@ -28,6 +28,7 @@ os.environ["FROZEN_NOW"] = FROZEN_NOW
 os.environ["EMBEDDER"] = "fake"  # hashing embedder: tests the wiring and the filters, not retrieval quality
 os.environ["CHROMA_PATH"] = os.path.join(_TMP_DIR, "chroma")
 os.environ["KB_INCLUDE_TEST_DOCS"] = "0"
+os.environ["DECISION_GATE"] = "0"  # the confirmation gate has its own tests (tests/test_confirmation_gate.py)
 
 from linecare import config, db  # noqa: E402  (must come after the environment is prepared)
 from mocks.scenarios import DEMO_BY_ACCOUNT  # noqa: E402
@@ -109,3 +110,9 @@ def app_url(fake_lm):
     yield f"http://127.0.0.1:{port}"
     uv.should_exit = True
     thread.join(timeout=5)
+
+
+def pytest_collection_modifyitems(items):
+    """Browser tests last: Playwright's sync API leaves an event loop running in the main thread, after which
+    asyncio.run() (the confirmation gate's tests) would fail."""
+    items.sort(key=lambda item: "e2e" in item.nodeid.split("::")[0])
