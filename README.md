@@ -90,6 +90,8 @@ text to Microsoft's online voices. `FROZEN_NOW=2026-11-20T10:00:00` gives the sa
 
 ## Salesforce (optional)
 
+![The case the agent opened for a line fault, in a Salesforce Developer Edition org: origin Chat, category, diagnostics and the technician-visit comment](docs/screenshots/03-salesforce-case.png)
+
 The app uses the SQLite fake by default. To keep cases in a Salesforce org instead (a free Developer Edition is
 enough, about 15 minutes). The menu names below are from the current Salesforce help and may move between releases:
 
