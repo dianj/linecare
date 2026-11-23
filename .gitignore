@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated data (the mock systems are reseeded at start; see mocks/seed.py)
+data/
+*.db
+*.db-journal
+
+# Local notes, secrets and tooling
+HANDOFF.md
+.env
+.vscode/
+.idea/
+.claude/
+*.log
+test-results/
+.coverage
+coverage.xml
+
+# Eval run details (the summary evals/results/latest.md is committed)
+evals/results/*.json

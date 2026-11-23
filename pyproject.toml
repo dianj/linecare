@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# FastAPI declares request parameters with calls in default arguments (Depends(), File(), Form()).
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Text the model reads (system prompt, tool schemas) reads best one rule per line;
+# wrapping would make it harder to review what the model actually sees. The agent loop itself is checked.
+"linecare/agents/prompts.py" = ["E501"]
+"linecare/tool_schemas.py" = ["E501"]
