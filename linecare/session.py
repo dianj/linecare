@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from linecare import config
+from linecare.language import NAMES as LANGUAGE_NAMES
 from mocks import clock
 
 UNVERIFIED, VERIFIED, LOCKED, HANDED_OVER = "UNVERIFIED", "VERIFIED", "LOCKED", "HANDED_OVER"
@@ -37,6 +38,8 @@ class Session:
     area_code: str | None = None
     plan_name: str | None = None
     router_model: str | None = None
+    account_status: str | None = None
+    message_language: str = "en"                     # language of the latest customer message
     failed_attempts: int = 0
     locked_until: datetime | None = None
     turn: int = 0
@@ -82,6 +85,7 @@ class Session:
         self.area_code = customer["area_code"]
         self.plan_name = customer["plan_name"]
         self.router_model = customer["router_model"]
+        self.account_status = customer["status"]
 
     # --- confirmations -------------------------------------------------------------------
     def create_pending(self, tool: str, arguments: dict, summary: str) -> PendingAction:
@@ -104,9 +108,13 @@ class Session:
     # --- prompt --------------------------------------------------------------------------
     def state_block(self) -> str:
         """Facts for the system prompt. Never the PIN, date of birth, address, phone or email."""
-        lines = [f"today: {clock.now():%A %Y-%m-%d %H:%M}", f"identity: {self.state.lower()}"]
+        lines = [f"today: {clock.now():%A %Y-%m-%d %H:%M}",
+                 f"the customer's latest message is in {LANGUAGE_NAMES[self.message_language]}: reply in "
+                 f"{LANGUAGE_NAMES[self.message_language]}",
+                 f"identity: {self.state.lower()}"]
         if self.verified:
-            lines += [f"customer first name: {self.first_name}", f"plan: {self.plan_name}",
+            lines += [f"customer first name: {self.first_name}", f"account status: {self.account_status}",
+                      f"plan: {self.plan_name}",
                       f"router: {self.router_model}", f"remote reboots used: {self.reboots} of "
                       f"{config.MAX_REBOOTS_PER_CONVERSATION}"]
         elif self.state == UNVERIFIED and self.failed_attempts:

@@ -10,7 +10,7 @@ MARIA = DEMO_BY_ACCOUNT["QN-100003"]
 def test_successful_verification_fills_the_session(new_session):
     session = new_session()
     result = verify_customer(session, "qn 100003", pin=MARIA.pin)  # spacing and case are normalised
-    assert result == {"status": "ok", "verified": True, "first_name": "Мария"}
+    assert result == {"status": "ok", "verified": True, "first_name": "Мария", "account_status": "active"}
     assert session.state == VERIFIED and session.account_no == "QN-100003" and session.area_code == "PLD-01"
 
 
@@ -94,6 +94,15 @@ def test_a_new_offer_replaces_the_previous_one_for_the_same_tool(new_session):
     assert list(session.pending) == [second.confirmation_id]
     session.begin_turn()
     assert session.take_pending("reboot_router", first.confirmation_id)[0] is None
+
+
+def test_the_state_block_names_the_reply_language_and_the_account_status(verified):
+    # Found by the evals: Gemma answered an English message in Bulgarian because the name was Cyrillic, and it
+    # did not notice a suspended account.
+    session = verified("QN-100006")
+    session.message_language = "bg"
+    block = session.state_block()
+    assert "latest message is in Bulgarian: reply in Bulgarian" in block and "account status: suspended" in block
 
 
 def test_the_state_block_has_facts_but_no_secrets(verified):

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from linecare import db
 from linecare.agents.loop import run_tool_loop, trim_history
 from linecare.agents.prompts import build_customer_prompt
+from linecare.language import detect_language
 from linecare.redaction import redact_arguments, redact_history, redact_text
 from linecare.registry import execute_tool_call
 from linecare.tool_schemas import CUSTOMER_TOOLS
@@ -36,6 +37,7 @@ def run_customer_turn(session, text: str, model: str) -> TurnResult:
     If the model call fails, the exception propagates and the session history is left as it was.
     """
     session.begin_turn()
+    session.message_language = detect_language(text)
     was_verified = session.verified
     history = list(session.history) + [{"role": "user", "content": text}]
     calls: list = []

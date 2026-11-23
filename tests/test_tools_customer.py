@@ -37,7 +37,10 @@ def test_line_test_explains_an_area_outage(verified):
 
 
 def test_router_status_and_wifi_scan(verified):
-    assert get_router_status(verified("QN-100003"))["verdict"] == "frozen"
+    frozen = get_router_status(verified("QN-100003"))
+    # Found by the evals: Gemma offered the restart in words only, so the customer had to agree twice.
+    assert frozen["verdict"] == "frozen" and "call reboot_router now" in frozen["next_step"]
+    assert "next_step" not in get_router_status(verified("QN-100007"))
     bands = scan_wifi(verified("QN-100004"))["bands"]
     assert bands[0] == {"band": "2.4 GHz", "channel": 6, "neighbour_networks": 23, "interference": "high"}
 

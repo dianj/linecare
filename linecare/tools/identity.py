@@ -35,7 +35,7 @@ def verify_customer(session, account_no: str, pin: str = None, dob: str = None) 
     customer = systems.get_customer(account)
     if customer is not None and systems.verify(account, pin=pin, dob=dob):
         session.mark_verified(customer)
-        return ok(verified=True, first_name=customer["first_name"])
+        return ok(verified=True, first_name=customer["first_name"], account_status=customer["status"])
     # The same answer for an unknown account and a wrong PIN, so the tool cannot be used to probe accounts.
     if session.record_failed_attempt():
         return blocked("identity_locked", "Verification failed too many times; identity checks are locked for "

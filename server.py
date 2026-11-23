@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from linecare import config, db
 from linecare.agents.customer import run_customer_turn
 from linecare.agents.loop import llm_client
+from linecare.language import detect_language
 from linecare.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
 from linecare.session import Session
 from mocks.app import router as mock_router
@@ -51,11 +52,6 @@ MODEL_SWITCHING = {
     "en": "One moment please, the assistant is switching to another AI model. Try again in a minute.",
     "bg": "Момент, моля: асистентът превключва към друг AI модел. Опитайте отново след минута.",
 }
-
-
-def _language(text: str) -> str:
-    cyrillic = sum("Ѐ" <= ch <= "ӿ" for ch in text)
-    return "bg" if cyrillic and cyrillic * 3 >= sum(ch.isalpha() for ch in text) else "en"
 
 
 def _new_entry() -> dict:
@@ -100,7 +96,7 @@ def serve_ui():
 async def customer_chat(body: ChatRequest, request: Request):
     cookie, entry = get_session(request)
     session, text = entry["session"], body.text.strip()
-    language = _language(text)
+    language = detect_language(text)
     if not text:
         return respond({"error_code": "empty", "message": "Type a message."}, cookie, 400)
     if entry["lock"].locked():

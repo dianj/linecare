@@ -49,3 +49,11 @@ def test_history_redaction_covers_user_text_assistant_text_and_tool_arguments():
     assert "1590" not in json.dumps(history)
     assert json.loads(history[1]["tool_calls"][0]["function"]["arguments"])["account_no"] == "QN-100003"
     assert "2019" in history[4]["content"]  # sent after verification: only known secrets are removed
+
+
+def test_message_language():
+    from linecare.language import detect_language
+
+    assert detect_language("Нямам интернет от сутринта") == "bg"
+    assert detect_language("My internet is down, Мария here") == "en"
+    assert detect_language("QN-100003 1590") == "en"

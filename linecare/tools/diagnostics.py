@@ -11,8 +11,18 @@ def run_line_test(session) -> dict:
     return ok(**result)
 
 
+NEXT_STEPS = {
+    "frozen": "A remote restart usually fixes this. To offer it, call reboot_router now without confirmation_id; "
+              "it prepares the offer you then ask the customer about.",
+    "rebooting": "The router is restarting. Check again in a moment before telling the customer it works.",
+}
+
+
 def get_router_status(session) -> dict:
-    return ok(**systems.router_status(session.account_no))
+    status = systems.router_status(session.account_no)
+    if status["verdict"] in NEXT_STEPS:
+        status["next_step"] = NEXT_STEPS[status["verdict"]]
+    return ok(**status)
 
 
 def reboot_router(session, confirmation_id: str = None) -> dict:
