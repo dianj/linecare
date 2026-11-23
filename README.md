@@ -15,6 +15,8 @@ of PINs and dates of birth are enforced in Python, and measured with real-model 
 > built; an internal helpdesk agent, an operator console and a live Salesforce adapter are next
 > ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
 
+![Sequence diagram of one customer turn](linecare_diagram.svg)
+
 ![A line fault: checks, a CRM case and a technician visit booked after the customer confirmed](docs/screenshots/01-line-fault-technician.png)
 
 ![An answer from the help articles, with the source passage opened](docs/screenshots/02-wifi-answer-with-source.png)

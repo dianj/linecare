@@ -45,7 +45,7 @@ mocks/                              the operator's systems: customers, network, 
 LLM: any OpenAI-compatible server (developed with LM Studio: Gemma 4 26B, Qwen 3.8 27B)
 ```
 
-One customer turn:
+One customer turn (diagram: [linecare_diagram.svg](../linecare_diagram.svg)):
 1. `POST /api/customer/chat` (text) or `/api/customer/voice` (audio → Whisper → text).
 2. The session (per browser cookie) adds a **state block** to the system prompt: identity state, first name, plan,
    router, account status, reply language, open case, booked visit, pending confirmations. Never the PIN, date of
