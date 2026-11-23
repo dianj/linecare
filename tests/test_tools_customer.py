@@ -2,7 +2,13 @@
 from linecare import config
 from linecare.tools.billing import get_bill_status
 from linecare.tools.common import normalise_account_no
-from linecare.tools.diagnostics import get_router_status, reboot_router, run_line_test, scan_wifi
+from linecare.tools.diagnostics import (
+    change_wifi_channel,
+    get_router_status,
+    reboot_router,
+    run_line_test,
+    scan_wifi,
+)
 from linecare.tools.network import check_outage
 
 
@@ -41,8 +47,10 @@ def test_router_status_and_wifi_scan(verified):
     # Found by the evals: Gemma offered the restart in words only, so the customer had to agree twice.
     assert frozen["verdict"] == "frozen" and "call reboot_router now" in frozen["next_step"]
     assert "next_step" not in get_router_status(verified("QN-100007"))
-    bands = scan_wifi(verified("QN-100004"))["bands"]
-    assert bands[0] == {"band": "2.4 GHz", "channel": 6, "neighbour_networks": 23, "interference": "high"}
+    scan = scan_wifi(verified("QN-100004"))
+    assert scan["bands"][0] == {"band": "2.4 GHz", "channel": 6, "neighbour_networks": 23, "interference": "high"}
+    assert "change_wifi_channel" in scan["next_step"]
+    assert "next_step" not in scan_wifi(verified("QN-100007"))
 
 
 def test_bill_status_has_amounts_but_no_payment_details(verified):
@@ -81,3 +89,28 @@ def test_at_most_two_reboots_per_conversation(verified):
         session.begin_turn()
         assert reboot_router(session, confirmation_id=offer["confirmation_id"])["status"] == "ok"
     assert reboot_router(session)["reason"] == "reboot_limit"
+
+
+def test_wifi_channel_change_needs_a_confirmation_and_clears_the_interference(verified):
+    session = verified("QN-100004")
+    offer = change_wifi_channel(session, band="2.4")
+    assert offer["status"] == "needs_confirmation" and "2.4 GHz" in offer["summary"]
+    assert scan_wifi(session)["bands"][0]["interference"] == "high"  # nothing happened yet
+    session.begin_turn()
+    done = change_wifi_channel(session, band="2.4", confirmation_id=offer["confirmation_id"])
+    assert (done["status"], done["previous_channel"], done["channel"]) == ("ok", 6, 1)
+    assert scan_wifi(session)["bands"][0] == {"band": "2.4 GHz", "channel": 1, "neighbour_networks": 3,
+                                              "interference": "low"}
+    assert session.fixes == [{"tool": "change_wifi_channel", "turn": 2}]
+
+
+def test_wifi_channel_change_checks_band_and_channel(verified):
+    session = verified("QN-100004")
+    assert change_wifi_channel(session, band="6")["status"] == "error"
+    offer = change_wifi_channel(session, band="5", channel=13)       # not a 5 GHz channel
+    session.begin_turn()
+    refused = change_wifi_channel(session, band="5", confirmation_id=offer["confirmation_id"])
+    assert refused["status"] == "error" and "auto" in refused["message"]
+    offer = change_wifi_channel(session, band="5 GHz", channel="40")
+    session.begin_turn()
+    assert change_wifi_channel(session, band="5", confirmation_id=offer["confirmation_id"])["channel"] == 40

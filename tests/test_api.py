@@ -128,7 +128,7 @@ def test_the_state_reaches_the_model_and_reasoning_is_off(client, fake_lm):
     assert "identity: unverified" in fake_lm.requests[0]["messages"][0]["content"]
     assert "identity: verified" in fake_lm.requests[1]["messages"][0]["content"]  # updated in the same turn
     assert fake_lm.requests[0]["reasoning_effort"] == config.LLM_REASONING_EFFORT == "none"
-    assert len(fake_lm.requests[0]["tools"]) == 12
+    assert len(fake_lm.requests[0]["tools"]) == 13
 
 
 def test_an_llm_outage_returns_a_friendly_message_and_keeps_the_session(client, fake_lm):

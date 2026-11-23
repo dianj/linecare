@@ -132,3 +132,47 @@ def test_after_a_fix_the_state_block_asks_for_the_outcome(verified):
     assert "call record_outcome at once" in session.state_block()
     session.outcome = "resolved"
     assert "call record_outcome" not in session.state_block()
+
+
+def test_the_lock_follows_the_account_number_into_new_conversations(new_session, monkeypatch):
+    first = new_session()
+    for wrong in ("0000", "1111"):
+        verify_customer(first, "QN-100003", pin=wrong)
+    second = new_session()  # a new conversation does not give new attempts for the same account
+    third_failure = verify_customer(second, "QN-100003", pin="2222")
+    assert third_failure["reason"] == "identity_locked" and second.state == LOCKED
+    other = new_session()
+    assert verify_customer(other, "QN-100003", pin=MARIA.pin)["reason"] == "identity_locked"  # even the right PIN
+    assert other.state == UNVERIFIED  # the other conversation can still verify another account
+    assert verify_customer(other, "QN-100002", pin=DEMO_BY_ACCOUNT["QN-100002"].pin)["verified"] is True
+
+    monkeypatch.setattr(config, "FROZEN_NOW", "2026-11-20T10:15:00")
+    later = new_session()
+    assert verify_customer(later, "QN-100003", pin=MARIA.pin)["verified"] is True
+
+
+def test_unknown_account_numbers_lock_the_same_way(new_session):
+    """Otherwise the absence of a lock would reveal that an account number does not exist."""
+    sessions = [new_session() for _ in range(3)]
+    results = [verify_customer(s, "QN-999999", pin="1234") for s in sessions]
+    assert [r.get("reason") for r in results] == [None, None, "identity_locked"]
+    assert verify_customer(new_session(), "QN-999999", pin="1234")["reason"] == "identity_locked"
+
+
+def test_a_successful_check_clears_earlier_failures(new_session):
+    verify_customer(new_session(), "QN-100003", pin="0000")
+    verify_customer(new_session(), "QN-100003", pin="1111")
+    assert verify_customer(new_session(), "QN-100003", pin=MARIA.pin)["verified"] is True
+    assert verify_customer(new_session(), "QN-100003", pin="0000")["attempts_left"] == 2  # counting starts again
+
+
+def test_verification_brings_the_crm_history_of_a_repeat_caller(new_session):
+    """Found by the evals: with the history only in create_case, Gemma offered a colleague late or never (S9)."""
+    session = new_session()
+    result = verify_customer(session, "QN-100009", pin=DEMO_BY_ACCOUNT["QN-100009"].pin)
+    assert result["crm_history"] == "2 cases about intermittent in the last 30 days"
+    assert "repeat_contact" in result["next_step"]
+    assert "CRM history: 2 cases about intermittent" in session.state_block()
+    plain = new_session()
+    assert "crm_history" not in verify_customer(plain, "QN-100003", pin=MARIA.pin)
+    assert "CRM history" not in plain.state_block()

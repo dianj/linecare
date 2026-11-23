@@ -11,7 +11,13 @@ from linecare.session import HANDED_OVER, LOCKED, VERIFIED
 from linecare.tools.billing import get_bill_status
 from linecare.tools.cases import create_case
 from linecare.tools.common import blocked, error
-from linecare.tools.diagnostics import get_router_status, reboot_router, run_line_test, scan_wifi
+from linecare.tools.diagnostics import (
+    change_wifi_channel,
+    get_router_status,
+    reboot_router,
+    run_line_test,
+    scan_wifi,
+)
 from linecare.tools.handover import handover_to_human
 from linecare.tools.identity import verify_customer
 from linecare.tools.kb import search_help
@@ -28,6 +34,7 @@ CUSTOMER_FUNCTIONS = {
     "get_router_status": get_router_status,
     "reboot_router": reboot_router,
     "scan_wifi": scan_wifi,
+    "change_wifi_channel": change_wifi_channel,
     "get_bill_status": get_bill_status,
     "search_help": search_help,
     "create_case": create_case,

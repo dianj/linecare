@@ -12,7 +12,7 @@ from linecare.redaction import redact_text
 from mocks import clock
 
 DIAGNOSTIC_TOOLS = ("check_outage", "run_line_test", "get_router_status", "scan_wifi", "get_bill_status")
-ACTION_TOOLS = ("reboot_router", "create_case", "book_technician", "record_outcome")
+ACTION_TOOLS = ("reboot_router", "change_wifi_channel", "create_case", "book_technician", "record_outcome")
 
 
 class Customer(BaseModel):
@@ -72,6 +72,8 @@ def describe(tool: str, result: dict) -> str:
         return text + (f", overdue since {result['overdue_since']}" if result.get("overdue_since") else "")
     if tool == "reboot_router":
         return "remote restart started"
+    if tool == "change_wifi_channel":
+        return f"Wi-Fi {result['band']} moved from channel {result['previous_channel']} to {result['channel']}"
     if tool == "create_case":
         return f"case {result['case_ref']}" + (" (already open)" if result.get("already_open") else "")
     if tool == "book_technician":

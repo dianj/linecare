@@ -1,6 +1,6 @@
-"""Remote diagnostics on the verified customer's line and router. The reboot is a two-step action."""
+"""Remote diagnostics on the verified customer's line, router and Wi-Fi. Reboot and channel change are two-step."""
 from linecare import config
-from linecare.tools.common import blocked, ok, two_step
+from linecare.tools.common import blocked, error, ok, two_step
 from mocks import service as systems
 
 
@@ -15,6 +15,12 @@ NEXT_STEPS = {
     "frozen": "A remote restart usually fixes this. To offer it, call reboot_router now without confirmation_id; "
               "it prepares the offer you then ask the customer about.",
     "rebooting": "The router is restarting. Check again in a moment before telling the customer it works.",
+    # S5: found when a customer reset the router to factory settings. Only staff can push the configuration.
+    # Found by the evals: in Bulgarian, Gemma replied "I will open a case and transfer you" and called neither.
+    "config_error": "The router's internet configuration is wrong (typical after a factory reset). A restart does "
+                    "not fix it and you cannot change it. Do both now, in this turn, before you reply: create_case "
+                    "(category router), then handover_to_human with reason config_required. Then tell the customer "
+                    "that a colleague will set the router up remotely. Do not say you 'will' do it.",
 }
 
 
@@ -46,4 +52,28 @@ def reboot_router(session, confirmation_id: str = None) -> dict:
 
 
 def scan_wifi(session) -> dict:
-    return ok(**systems.wifi_scan(session.account_no))
+    result = systems.wifi_scan(session.account_no)
+    if any(b["interference"] == "high" for b in result["bands"]):
+        result["next_step"] = ("A crowded band: offer change_wifi_channel (call it now without confirmation_id to "
+                               "prepare the offer) and explain the Wi-Fi tips from search_help.")
+    return ok(**result)
+
+
+def change_wifi_channel(session, band: str, channel="auto", confirmation_id: str = None) -> dict:
+    band_key = str(band).replace("GHz", "").strip()
+    if band_key not in systems.WIFI_CHANNELS:
+        return error("band must be '2.4' or '5'.")
+    channel = "auto" if channel in (None, "") else channel
+    summary = (f"Move the customer's {band_key} GHz Wi-Fi to "
+               f"{'a less crowded channel' if str(channel).lower() == 'auto' else f'channel {channel}'}. Devices "
+               "on that band disconnect for a few seconds and reconnect by themselves.")
+
+    def execute(arguments):
+        result = systems.change_wifi_channel(session.account_no, arguments["band"], arguments["channel"])
+        if not result["changed"]:
+            return error(f"That channel cannot be used ({result['reason']}). Use 'auto'.")
+        session.record_fix("change_wifi_channel")
+        return ok(**result, message="Done. Ask the customer to test the Wi-Fi again and say whether it is better.")
+
+    return two_step(session, "change_wifi_channel", {"band": band_key, "channel": channel}, summary,
+                    confirmation_id, execute)

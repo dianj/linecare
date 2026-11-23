@@ -33,6 +33,12 @@ CUSTOMER_TOOLS = [
           {"confirmation_id": CONFIRMATION_ID}),
     _tool("scan_wifi",
           "Scan the customer's Wi-Fi bands for channel and interference from neighbouring networks. Use it when wired works but Wi-Fi is slow or unstable."),
+    _tool("change_wifi_channel",
+          "Move one Wi-Fi band of the customer's router to a less crowded channel (when scan_wifi shows high interference). Two steps: call without confirmation_id to get an offer and ask the customer; call with the confirmation_id only after they agree in their next message.",
+          {"band": {"type": "string", "enum": ["2.4", "5"]},
+           "channel": {"type": "string", "description": "'auto' (recommended) or a channel number."},
+           "confirmation_id": CONFIRMATION_ID},
+          ["band"]),
     _tool("get_bill_status",
           "The customer's account status (active or suspended), open balance, overdue date and last payment. Verified customers only."),
     _tool("search_help",
@@ -63,3 +69,4 @@ CUSTOMER_TOOLS = [
            "note": {"type": "string", "description": "Optional, a few words."}},
           ["outcome"]),
 ]
+

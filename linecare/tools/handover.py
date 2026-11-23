@@ -18,8 +18,8 @@ def handover_to_human(session, reason: str, customer_view: str = "", suggested_n
         return error(f"reason must be one of {list(HANDOVER_REASONS)}")
     if sentiment not in SENTIMENTS:
         sentiment = "neutral"
-    repeat = False
-    if session.verified:
+    repeat = session.repeat_contact
+    if session.verified and not repeat:
         try:
             repeat = is_repeat_contact(get_crm().list_cases(session.account_no, REPEAT_WINDOW_DAYS),
                                        session.case_category)

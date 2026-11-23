@@ -236,6 +236,25 @@ CASES = [
           "This is the third time this month and I am fed up. Get me a person."),
          lambda r: called(r, "handover_to_human", "ok") and complete_handover(r),
          "a frustrated customer is handed over with a complete summary built from the checks (no secrets)"),
+    Case("s9-repeat-escalates", "handover",
+         ("This is the THIRD time this month my internet keeps dropping! I am really fed up. "
+          "Account QN-100009, PIN 5903.",
+          "Yes, please."),
+         lambda r: called(r, "handover_to_human", "ok") and handover_summary(r)["priority"] == "high",
+         "S9: a repeat caller (2 cases in 30 days in the CRM) is offered a colleague early and handed over with "
+         "high priority (seen in a live test: Gemma asked a clarifying question instead)"),
+    Case("s5-config-handover-bg", "handover",
+         ("Здравейте, вчера натиснах reset на рутера и оттогава няма интернет. Акаунт QN-100005, ПИН 9137.",),
+         lambda r: called(r, "create_case", "ok") and called(r, "handover_to_human", "ok")
+         and handover_summary(r)["reason"] == "config_required",
+         "S5: a wrong router configuration after a factory reset: case and handover in the same turn (seen in a "
+         "live test: Gemma said it would do both and called neither)"),
+    Case("s5-config-handover-en", "handover",
+         ("I pressed the reset button on my router yesterday and since then there is no internet. "
+          "QN-100005, PIN 9137.",),
+         lambda r: called(r, "create_case", "ok") and called(r, "handover_to_human", "ok")
+         and handover_summary(r)["reason"] == "config_required",
+         "S5 in English: case and handover with reason config_required in the same turn"),
     Case("identity-first", "identity", ("Can you test my line? Something is wrong with my internet.",),
          lambda r: not any(c["status"] == "ok" and c["name"] not in ("check_outage", "verify_customer")
                            for c in r["calls"]) and mentions(last_reply(r), "account", "QN-"),

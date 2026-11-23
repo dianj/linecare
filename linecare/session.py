@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from linecare import config
 from linecare.language import NAMES as LANGUAGE_NAMES
+from linecare.policy.escalation import REPEAT_WINDOW_DAYS
 from mocks import clock
 
 UNVERIFIED, VERIFIED, LOCKED, HANDED_OVER = "UNVERIFIED", "VERIFIED", "LOCKED", "HANDED_OVER"
@@ -56,6 +57,8 @@ class Session:
     outcome: str | None = None                       # the customer's answer via record_outcome
     logged_outcome: str | None = None                # conversations.outcome in the database
     pending_crm_sync: bool = False                   # a case could not be written to the CRM
+    repeat_contact: bool = False                     # the CRM shows earlier cases for the same issue (S9)
+    repeat_categories: dict = field(default_factory=dict)  # case category -> recent cases (escalation policy)
     pending: dict = field(default_factory=dict)      # confirmation_id -> PendingAction
     secrets: set = field(default_factory=set)        # raw PINs / dates passed to verify_customer
     identity_phase_upto: int = 0                     # history index: user messages before it were sent unverified
@@ -83,6 +86,11 @@ class Session:
             self.locked_until = clock.now() + timedelta(minutes=config.IDENTITY_LOCK_MINUTES)
             return True
         return False
+
+    def lock(self) -> None:
+        """Lock this conversation now (also when the account number was locked by other conversations)."""
+        self.state = LOCKED
+        self.locked_until = clock.now() + timedelta(minutes=config.IDENTITY_LOCK_MINUTES)
 
     def attempts_left(self) -> int:
         return max(config.MAX_IDENTITY_ATTEMPTS - self.failed_attempts, 0)
@@ -141,6 +149,11 @@ class Session:
             lines.append(f"identity checks locked until {self.locked_until:%H:%M}")
         elif self.state == HANDED_OVER:
             lines.append(f"handed over to a colleague ({self.handover_id}): take no further actions")
+        if self.repeat_categories and self.state != HANDED_OVER:
+            history = ", ".join(f"{n} cases about {c}" for c, n in self.repeat_categories.items())
+            lines.append(f"CRM history: {history} in the last {REPEAT_WINDOW_DAYS} days: the same problem again is a "
+                         "repeat contact; "
+                         "offer a colleague (handover_to_human, reason repeat_contact)")
         if self.open_case_ref:
             lines.append(f"open case: {self.open_case_ref} ({self.case_category})")
         if self.appointment:
