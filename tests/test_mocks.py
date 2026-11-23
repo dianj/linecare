@@ -140,3 +140,22 @@ def test_mock_systems_are_documented_in_openapi(api):
     paths = api.get("/openapi.json").json()["paths"]
     assert {"/mock/customers/{account_no}", "/mock/diagnostics/{account_no}/line-test",
             "/mock/scheduling/appointments"} <= set(paths)
+
+
+def test_the_wifi_channel_endpoint():
+    import server
+
+    client = TestClient(server.app)
+    changed = client.post("/mock/diagnostics/QN-100004/wifi-channel", json={"band": "2.4", "channel": "auto"})
+    assert changed.json() == {"changed": True, "band": "2.4 GHz", "previous_channel": 6, "channel": 1}
+    refused = client.post("/mock/diagnostics/QN-100004/wifi-channel", json={"band": "2.4", "channel": 13})
+    assert refused.status_code == 422
+    assert client.post("/mock/diagnostics/QN-999999/wifi-channel", json={"band": "5"}).status_code == 404
+
+
+def test_outage_history_and_missed_visits_for_the_compensation_rules():
+    history = {o["outage_id"]: o for o in service.outage_history("SOF-05", 60)}
+    assert history["OUT-1987"]["hours"] == 33 and not history["OUT-1987"]["planned"]
+    assert service.get_outage("out-1990")["notice_hours"] == 72
+    assert service.get_outage("OUT-2041")["hours"] is None          # still active
+    assert service.appointments("QN-100009")[0]["status"] == "no_show"

@@ -65,6 +65,19 @@ def wifi_scan(account_no: str):
     return _or_404(service.wifi_scan(account_no))
 
 
+class WifiChannelRequest(BaseModel):
+    band: str
+    channel: str | int = "auto"
+
+
+@router.post("/diagnostics/{account_no}/wifi-channel", summary="Change the Wi-Fi channel of a band")
+def wifi_channel(account_no: str, body: WifiChannelRequest):
+    result = _or_404(service.change_wifi_channel(account_no, body.band, body.channel))
+    if not result["changed"]:
+        raise HTTPException(status_code=422, detail=result)
+    return result
+
+
 @router.get("/billing/{account_no}", summary="Balance, recent bills and account status")
 def billing(account_no: str):
     return _or_404(service.billing(account_no))

@@ -60,7 +60,8 @@ def test_the_summary_is_built_from_the_tool_log(verified):
     secrets = {DEMO_BY_ACCOUNT["QN-100002"].pin, DEMO_BY_ACCOUNT["QN-100002"].dob}
     assert summary_problems(summary, secrets) == []
     with db.connect() as conn:
-        assert conn.execute("SELECT handover_id, status FROM crm_cases").fetchone()[:] == ("HO-0001", "Escalated")
+        row = conn.execute("SELECT handover_id, status FROM crm_cases WHERE case_ref = '00001001'").fetchone()
+        assert row[:] == ("HO-0001", "Escalated")
         assert conn.execute("SELECT outcome FROM conversations WHERE conv_id = ?",
                             (session.conv_id,)).fetchone()[0] == "handover"
 

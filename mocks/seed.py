@@ -47,7 +47,8 @@ CREATE TABLE sys_customers (account_no TEXT PRIMARY KEY, first_name TEXT, last_n
     plan_id TEXT REFERENCES sys_plans(plan_id), router_model TEXT, router_serial TEXT,
     status TEXT CHECK (status IN ('active', 'suspended')), since TEXT, scenario TEXT);
 CREATE TABLE sys_outages (outage_id TEXT PRIMARY KEY, area_code TEXT, service TEXT, started_at TEXT, eta TEXT,
-    status TEXT, cause_public TEXT);
+    status TEXT CHECK (status IN ('active', 'resolved')), cause_public TEXT, planned INTEGER NOT NULL DEFAULT 0,
+    announced_at TEXT, ended_at TEXT);
 CREATE TABLE sys_line_state (account_no TEXT PRIMARY KEY, sync INTEGER, attenuation_db REAL, snr_db REAL,
     errors_15min INTEGER, last_drop_at TEXT, drops_24h INTEGER);
 CREATE TABLE sys_router_state (account_no TEXT PRIMARY KEY, online INTEGER, uptime_s INTEGER, firmware TEXT,
@@ -60,7 +61,7 @@ CREATE TABLE sys_bills (bill_id TEXT PRIMARY KEY, account_no TEXT, period TEXT, 
 CREATE TABLE sys_tech_slots (slot_id TEXT PRIMARY KEY, area_code TEXT, start TEXT, end TEXT, capacity INTEGER,
     booked INTEGER);
 CREATE TABLE sys_appointments (appt_id TEXT PRIMARY KEY, account_no TEXT, slot_id TEXT, reason TEXT, case_ref TEXT,
-    status TEXT);
+    status TEXT CHECK (status IN ('booked', 'cancelled', 'done', 'no_show')), missed_by TEXT, start TEXT);
 """
 
 
@@ -98,6 +99,8 @@ def _apply_scenario(scenario, line, router, wifi, now):
         router.update(wan_mode="dhcp", config_ok=0, uptime_s=2 * 3600)
     elif scenario == "S8":
         line.update(snr_db=9.5, errors_15min=45, last_drop_at=(now - timedelta(minutes=40)).isoformat(), drops_24h=4)
+    elif scenario == "S9":  # the same intermittent fault keeps coming back (CRM history in linecare/db.py)
+        line.update(snr_db=11.2, errors_15min=60, last_drop_at=(now - timedelta(hours=3)).isoformat(), drops_24h=2)
 
 
 def seed(conn) -> None:
@@ -149,7 +152,9 @@ def seed(conn) -> None:
         _seed_bills(conn, c, plan_price[c["plan_id"]], now)
 
     _seed_outages(conn, now)
+    _seed_outage_history(conn, now)
     _seed_slots(conn, now)
+    _seed_missed_visit(conn, now)
 
 
 def _seed_bills(conn, customer, price, now):
@@ -166,15 +171,41 @@ def _seed_bills(conn, customer, price, now):
         conn.execute("INSERT INTO sys_bills VALUES (?, ?, ?, ?, ?, ?, ?)", row)
 
 
+OUTAGE_COLUMNS = "(outage_id, area_code, service, started_at, eta, status, cause_public)"
+
+
 def _seed_outages(conn, now):
-    conn.execute("INSERT INTO sys_outages VALUES (?, ?, ?, ?, ?, ?, ?)",
+    conn.execute(f"INSERT INTO sys_outages {OUTAGE_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?)",
                  ("OUT-2041", "SOF-02", "internet", (now - timedelta(hours=3)).isoformat(),
                   (now + timedelta(hours=4)).isoformat(), "active",
                   "A fibre cable was damaged during road works. Repair crews are on site."))
-    conn.execute("INSERT INTO sys_outages VALUES (?, ?, ?, ?, ?, ?, ?)",
+    conn.execute(f"INSERT INTO sys_outages {OUTAGE_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?)",
                  ("OUT-2042", "PLD-03", "tv", (now - timedelta(hours=1)).isoformat(),
                   (now + timedelta(hours=2)).isoformat(), "active",
                   "The TV platform has a technical fault. Internet is not affected."))
+
+
+def _seed_outage_history(conn, now):
+    """Resolved outages for the compensation rules (C1): over 24 h, planned with notice, and exactly 24 h."""
+    day = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    rows = [  # id, area, start, hours, planned, notice hours, public cause
+        ("OUT-1987", "SOF-05", day - timedelta(days=13), 33, 0, None, "A street cabinet was flooded."),
+        ("OUT-1990", "SOF-01", day - timedelta(days=20), 30, 1, 72, "Planned network upgrade."),
+        ("OUT-1995", "VAR-02", day - timedelta(days=6), 24, 0, None, "A power failure at the exchange."),
+    ]
+    for outage_id, area, start, hours, planned, notice, cause in rows:
+        end = start + timedelta(hours=hours)
+        announced = (start - timedelta(hours=notice)).isoformat() if notice else None
+        conn.execute("INSERT INTO sys_outages VALUES (?, ?, 'internet', ?, ?, 'resolved', ?, ?, ?, ?)",
+                     (outage_id, area, start.isoformat(), end.isoformat(), cause, planned, announced,
+                      end.isoformat()))
+
+
+def _seed_missed_visit(conn, now):
+    """S9's last visit was missed on Quillnet's side (rule C2). History ids start with AP-H."""
+    start = (now - timedelta(days=9)).replace(hour=10, minute=0, second=0, microsecond=0)
+    conn.execute("INSERT INTO sys_appointments VALUES ('AP-H001', 'QN-100009', NULL, 'intermittent_drops', "
+                 "'00000953', 'no_show', 'quillnet', ?)", (start.isoformat(timespec="minutes"),))
 
 
 def _seed_slots(conn, now):

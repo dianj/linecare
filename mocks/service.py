@@ -15,7 +15,8 @@ REBOOT_SECONDS = 2  # simulated; instant when the clock is frozen (tests, evals)
 
 def _customer_row(conn, account_no):
     return conn.execute(
-        "SELECT c.*, a.city, a.district, p.name AS plan_name, p.wan_mode AS plan_wan_mode, p.tv AS plan_tv "
+        "SELECT c.*, a.city, a.district, p.name AS plan_name, p.wan_mode AS plan_wan_mode, p.tv AS plan_tv, "
+        "p.price_eur AS plan_price "
         "FROM sys_customers c JOIN sys_areas a USING (area_code) JOIN sys_plans p USING (plan_id) "
         "WHERE account_no = ?", (account_no,)).fetchone()
 
@@ -30,7 +31,8 @@ def get_customer(account_no: str) -> dict | None:
     return {"account_no": row["account_no"], "first_name": row["first_name"], "last_name": row["last_name"],
             "language": row["language"], "area_code": row["area_code"], "city": row["city"],
             "district": row["district"], "plan_id": row["plan_id"], "plan_name": row["plan_name"],
-            "tv": bool(row["plan_tv"]), "router_model": row["router_model"], "status": row["status"]}
+            "monthly_fee_eur": row["plan_price"], "tv": bool(row["plan_tv"]), "router_model": row["router_model"],
+            "status": row["status"]}
 
 
 def verify(account_no: str, pin: str = None, dob: str = None) -> bool:
@@ -76,6 +78,43 @@ def outages(area_codes: list[str] = None, service: str = None) -> list[dict]:
     return [{"outage_id": r["outage_id"], "service": r["service"], "area": f"{r['district']}, {r['city']}",
              "area_code": r["area_code"], "started_at": r["started_at"], "eta": r["eta"],
              "cause_public": r["cause_public"]} for r in rows]
+
+
+def _outage_hours(row) -> float | None:
+    if not row["ended_at"]:
+        return None
+    seconds = (datetime.fromisoformat(row["ended_at"]) - datetime.fromisoformat(row["started_at"])).total_seconds()
+    return round(seconds / 3600, 2)
+
+
+def _notice_hours(row) -> float | None:
+    if not row["announced_at"]:
+        return None
+    seconds = (datetime.fromisoformat(row["started_at"]) - datetime.fromisoformat(row["announced_at"])).total_seconds()
+    return round(seconds / 3600, 2)
+
+
+def outage_record(row) -> dict:
+    return {"outage_id": row["outage_id"], "area_code": row["area_code"], "service": row["service"],
+            "status": row["status"], "started_at": row["started_at"], "ended_at": row["ended_at"],
+            "hours": _outage_hours(row), "planned": bool(row["planned"]), "notice_hours": _notice_hours(row),
+            "cause_public": row["cause_public"]}
+
+
+def get_outage(outage_id: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM sys_outages WHERE outage_id = ?",
+                           (str(outage_id).strip().upper(),)).fetchone()
+    return outage_record(row) if row else None
+
+
+def outage_history(area_code: str, days: int = 60) -> list[dict]:
+    """Active and resolved outages in an area that started within `days` days, newest first."""
+    since = (clock.now() - timedelta(days=days)).isoformat()
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM sys_outages WHERE area_code = ? AND started_at >= ? ORDER BY started_at "
+                            "DESC", (area_code, since)).fetchall()
+    return [outage_record(r) for r in rows]
 
 
 # --- diagnostics -------------------------------------------------------------------------
@@ -146,6 +185,39 @@ def wifi_scan(account_no: str) -> dict | None:
                        r["neighbour_networks"], "interference": r["interference"]} for r in rows]}
 
 
+WIFI_CHANNELS = {"2.4": (1, 6, 11), "5": (36, 40, 44, 48, 100, 104, 108, 112)}
+
+
+def change_wifi_channel(account_no: str, band: str, channel) -> dict | None:
+    """Move a band to another channel ('auto' = the least used one). The new channel has low interference.
+
+    Returns None for an unknown account, or {"changed": False, "reason": ...} for a channel the band cannot use.
+    """
+    band = str(band).replace("GHz", "").strip()
+    if band not in WIFI_CHANNELS:
+        return {"changed": False, "reason": "unknown_band", "bands": list(WIFI_CHANNELS)}
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM sys_wifi_env WHERE account_no = ? AND band = ?",
+                           (account_no, band)).fetchone()
+        if row is None:
+            return None
+        if str(channel).lower() == "auto":
+            # the mock's "least used" channel: the first one that is not the current one
+            channel = next(c for c in WIFI_CHANNELS[band] if c != row["channel"])
+        try:
+            channel = int(channel)
+        except (TypeError, ValueError):
+            channel = None
+        if channel not in WIFI_CHANNELS[band]:
+            return {"changed": False, "reason": "invalid_channel", "channels": list(WIFI_CHANNELS[band])}
+        conn.execute("UPDATE sys_wifi_env SET channel = ?, interference = 'low', neighbour_networks = ? "
+                     "WHERE account_no = ? AND band = ?", (channel, min(row["neighbour_networks"], 3), account_no,
+                                                          band))
+        column = "wifi_band_2g_channel" if band == "2.4" else "wifi_band_5g_channel"
+        conn.execute(f"UPDATE sys_router_state SET {column} = ? WHERE account_no = ?", (channel, account_no))
+    return {"changed": True, "band": f"{band} GHz", "previous_channel": row["channel"], "channel": channel}
+
+
 # --- billing -----------------------------------------------------------------------------
 
 def billing(account_no: str) -> dict | None:
@@ -187,11 +259,21 @@ def book_appointment(account_no: str, slot_id: str, reason: str, case_ref: str =
         slot = conn.execute("SELECT * FROM sys_tech_slots WHERE slot_id = ?", (slot_id,)).fetchone()
         if slot is None or slot["booked"] >= slot["capacity"]:
             return None
-        appt_id = f"AP-{conn.execute('SELECT COUNT(*) FROM sys_appointments').fetchone()[0] + 1:04d}"
-        conn.execute("INSERT INTO sys_appointments VALUES (?, ?, ?, ?, ?, 'booked')",
-                     (appt_id, account_no, slot_id, reason, case_ref))
+        count = conn.execute("SELECT COUNT(*) FROM sys_appointments WHERE appt_id NOT LIKE 'AP-H%'").fetchone()[0]
+        appt_id = f"AP-{count + 1:04d}"
+        conn.execute("INSERT INTO sys_appointments VALUES (?, ?, ?, ?, ?, 'booked', NULL, ?)",
+                     (appt_id, account_no, slot_id, reason, case_ref, slot["start"]))
         conn.execute("UPDATE sys_tech_slots SET booked = booked + 1 WHERE slot_id = ?", (slot_id,))
     return {"appointment_id": appt_id, "slot": {"slot_id": slot_id, "start": slot["start"], "end": slot["end"]}}
+
+
+def appointments(account_no: str) -> list[dict]:
+    """Technician visits of an account, newest first (booked, done, cancelled or missed)."""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM sys_appointments WHERE account_no = ? ORDER BY start DESC",
+                            (account_no,)).fetchall()
+    return [{"appointment_id": r["appt_id"], "start": r["start"], "status": r["status"], "reason": r["reason"],
+             "case_ref": r["case_ref"], "missed_by": r["missed_by"]} for r in rows]
 
 
 def cancel_appointment(appt_id: str) -> bool:

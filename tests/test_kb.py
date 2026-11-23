@@ -138,7 +138,8 @@ def test_the_post_filter_drops_everything_if_a_wrong_audience_slips_through(capl
 
 
 def test_unrelated_questions_are_not_answerable():
-    result = retriever.search("do you sell iPhones", audiences=PUBLIC)
+    # The hashing fake embedder scores shared (and hash-colliding) words, so the question is one rare word.
+    result = retriever.search("iPhone 17", audiences=PUBLIC)
     assert result.answerable is False and result.passages == []
 
 

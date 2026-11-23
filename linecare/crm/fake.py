@@ -21,7 +21,8 @@ class FakeCRM:
                 conn.execute("UPDATE crm_contacts SET first_name = ?, last_name = ? WHERE contact_id = ?",
                              (contact.first_name, contact.last_name, existing.contact_id))
                 return existing.contact_id
-            contact_id = f"003FAKE{conn.execute('SELECT COUNT(*) FROM crm_contacts').fetchone()[0] + 1:06d}"
+            count = conn.execute("SELECT COUNT(*) FROM crm_contacts WHERE contact_id LIKE '003FAKE%'").fetchone()[0]
+            contact_id = f"003FAKE{count + 1:06d}"
             conn.execute("INSERT INTO crm_contacts VALUES (?, ?, ?, ?)",
                          (contact_id, contact.account_no, contact.first_name, contact.last_name))
         return contact_id
@@ -43,7 +44,9 @@ class FakeCRM:
         if contact is None:
             raise LookupError(f"no CRM contact for {case.account_no}")
         with connect() as conn:
-            number = conn.execute("SELECT COUNT(*) FROM crm_cases").fetchone()[0] + FIRST_CASE_NUMBER
+            # History (case numbers below 1000, see db.seed_crm_history) does not shift new numbers.
+            last = conn.execute("SELECT MAX(CAST(case_ref AS INTEGER)) FROM crm_cases").fetchone()[0] or 0
+            number = max(last + 1, FIRST_CASE_NUMBER)
             case_ref = f"{number:08d}"
             conn.execute(
                 "INSERT INTO crm_cases (case_ref, contact_id, account_no, category, subject, description, "
@@ -76,7 +79,9 @@ class FakeCRM:
         with connect() as conn:
             if conn.execute("SELECT 1 FROM crm_cases WHERE case_ref = ?", (case_ref,)).fetchone() is None:
                 raise LookupError(f"unknown case {case_ref}")
-            comment_id = f"00aFAKE{conn.execute('SELECT COUNT(*) FROM crm_case_comments').fetchone()[0] + 1:06d}"
+            count = conn.execute("SELECT COUNT(*) FROM crm_case_comments WHERE comment_id LIKE '00aFAKE%'")\
+                .fetchone()[0]
+            comment_id = f"00aFAKE{count + 1:06d}"
             conn.execute("INSERT INTO crm_case_comments VALUES (?, ?, ?, ?, ?)",
                          (comment_id, case_ref, text, int(is_public), clock.now().isoformat()))
         return comment_id
