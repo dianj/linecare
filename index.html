@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LineCare · Quillnet support</title>
+<style>
+    :root {
+        --bg: #0f1419; --panel: #161d24; --panel-2: #1e2731; --line: #2e3a46;
+        --text: #e9eef3; --muted: #93a1ae; --accent: #3fb6c9; --accent-ink: #062027;
+        --ok: #5fb37a; --warn: #e8b33d; --bad: #e06c5a; --user: #23404a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; }
+    .app { display: grid; grid-template-columns: minmax(380px, 1.4fr) minmax(300px, 1fr); height: 100vh; }
+    .chat { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 0; }
+    header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; margin: 0; }
+    header .sub { color: var(--muted); font-size: 12px; }
+    .spacer { flex: 1; }
+    button { font: inherit; }
+    .ghost { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+    .ghost:hover { border-color: var(--accent); }
+    #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .msg { max-width: 86%; padding: 12px 14px; border-radius: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+    .msg.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+    .msg.bot { align-self: flex-start; background: var(--panel-2); border-bottom-left-radius: 4px; }
+    .msg.bot.error { border: 1px solid var(--bad); }
+    .msg.typing { color: var(--muted); }
+    .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; white-space: normal; }
+    .tool { font: 12px ui-monospace, Consolas, monospace; background: #0b1015; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
+    .tool::before { content: "●"; margin-right: 5px; color: var(--ok); }
+    .tool.blocked::before, .tool.needs_confirmation::before { color: var(--warn); }
+    .tool.error::before, .tool.system_error::before { color: var(--bad); }
+    form { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); }
+    textarea { flex: 1; resize: none; height: 52px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; }
+    .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 0 18px; font-weight: 600; cursor: pointer; }
+    .primary:disabled { opacity: .5; cursor: wait; }
+    aside { padding: 20px; overflow-y: auto; background: var(--panel); }
+    aside h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+    .state { display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px; font-size: 14px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+    .badge.verified { border-color: var(--ok); color: var(--ok); }
+    .badge.locked { border-color: var(--bad); color: var(--bad); }
+    .pending { color: var(--warn); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; }
+    td.mono { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+    .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+    <section class="chat">
+        <header>
+            <div>
+                <h1>LineCare</h1>
+                <div class="sub">Quillnet support assistant · fictional demo</div>
+            </div>
+            <div class="spacer"></div>
+            <button class="ghost" id="newChat" type="button">New conversation</button>
+        </header>
+        <div id="messages" aria-live="polite"></div>
+        <form id="composer">
+            <textarea id="input" aria-label="Message" placeholder="Describe the problem… (Enter to send, Shift+Enter for a new line)"></textarea>
+            <button class="primary" id="send" type="submit">Send</button>
+        </form>
+    </section>
+    <aside>
+        <h2>Conversation state</h2>
+        <div class="state" id="state"></div>
+        <h2>Demo customers</h2>
+        <table>
+            <thead><tr><th>Account</th><th>PIN</th><th>Scenario</th></tr></thead>
+            <tbody id="demo"></tbody>
+        </table>
+        <p class="note">Fictional accounts for trying the scenarios. Nothing is filled in automatically.</p>
+    </aside>
+</div>
+<script>
+const messages = document.getElementById('messages');
+const input = document.getElementById('input');
+const send = document.getElementById('send');
+
+// Every model or user text is set with textContent: nothing from the conversation is parsed as HTML.
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function addMessage(role, text, toolCalls, isError) {
+    const bubble = el('div', `msg ${role}${isError ? ' error' : ''}`, text);
+    if (toolCalls && toolCalls.length) {
+        const tools = el('div', 'tools');
+        for (const call of toolCalls) {
+            const status = /^[a-z_]+$/.test(call.status) ? call.status : 'unknown';
+            const chip = el('span', `tool ${status}`, call.name);
+            chip.title = `${status} ${JSON.stringify(call.arguments)}`;
+            tools.appendChild(chip);
+        }
+        bubble.appendChild(tools);
+    }
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+    return bubble;
+}
+
+function renderState(state) {
+    const box = document.getElementById('state');
+    box.replaceChildren();
+    const identity = el('div');
+    identity.appendChild(el('span', `badge ${state.identity}`, state.identity));
+    if (state.first_name) identity.appendChild(document.createTextNode(` ${state.first_name}`));
+    box.appendChild(identity);
+    for (const pending of state.pending || []) box.appendChild(el('div', 'pending', `Waiting for an answer: ${pending}`));
+}
+
+async function loadDemo() {
+    const data = await (await fetch('/api/demo-customers')).json();
+    const body = document.getElementById('demo');
+    for (const c of data.customers) {
+        const row = el('tr');
+        row.appendChild(el('td', 'mono', c.account_no));
+        row.appendChild(el('td', 'mono', c.pin));
+        const scenario = el('td', '', `${c.scenario}: ${c.description}`);
+        row.appendChild(scenario);
+        body.appendChild(row);
+    }
+}
+
+async function sendMessage(text) {
+    addMessage('user', text);
+    send.disabled = true;
+    const typing = addMessage('bot typing', 'LineCare is checking…');
+    try {
+        const response = await fetch('/api/customer/chat', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}),
+        });
+        const data = await response.json();
+        typing.remove();
+        if (!response.ok) { addMessage('bot', data.message || 'Something went wrong.', [], true); return; }
+        addMessage('bot', data.reply, data.tool_calls, data.system_error);
+        renderState(data.state);
+    } catch (e) {
+        typing.remove();
+        addMessage('bot', 'The server is not reachable.', [], true);
+    } finally {
+        send.disabled = false;
+        input.focus();
+    }
+}
+
+document.getElementById('composer').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (!text || send.disabled) return;
+    input.value = '';
+    sendMessage(text);
+});
+input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById('composer').requestSubmit();
+    }
+});
+document.getElementById('newChat').addEventListener('click', async () => {
+    const data = await (await fetch('/api/customer/reset', {method: 'POST'})).json();
+    messages.replaceChildren();
+    if (data.state) renderState(data.state);
+    addMessage('bot', 'Hello! I am LineCare, Quillnet\'s support assistant. How can I help?');
+});
+
+(async () => {
+    addMessage('bot', 'Hello! I am LineCare, Quillnet\'s support assistant. How can I help?');
+    const data = await (await fetch('/api/customer/state')).json();
+    renderState(data.state);
+    await loadDemo();
+})();
+</script>
+</body>
+</html>
