@@ -153,3 +153,68 @@ def test_a_voice_message_shows_the_transcript_and_the_reply_is_spoken(page, app_
     expect(page.locator(".msg.bot:not(.typing)").last).to_have_text("Съжалявам! Кажете ми номера на акаунта си.")
     page.wait_for_function("window.__played && window.__played.startsWith('blob:')")
     assert tts.calls == [("Съжалявам! Кажете ми номера на акаунта си.", "bg", "bg-BG-KalinaNeural")]
+
+
+# --- staff views -----------------------------------------------------------------------------------------------------
+
+OPERATOR_CARD = """SUMMARY: Martin's connection drops again; third case in 60 days and the last visit was missed.
+LIKELY CAUSE: An intermittent line fault.
+COMPENSATION: 10 EUR for the missed visit; goodwill up to 15 EUR needs a team lead.
+NEXT STEP: Open a network ticket (INT-03).
+DRAFT REPLY: Draft - review before sending: Dear Martin, <img src=x onerror="window.__xss=1">"""
+
+
+def test_operator_claims_gets_the_assist_comments_and_closes(page, app_url, fake_lm, verified):
+    from linecare.crm import get_crm
+    from linecare.tools.cases import create_case
+    from linecare.tools.handover import handover_to_human
+
+    session = verified("QN-100009")
+    create_case(session, category="intermittent", subject="Drops again")
+    handover_to_human(session, reason="repeat_contact", customer_view="Third time this month.")
+
+    page.goto(f"{app_url}/#operator")
+    expect(page.locator("#view-operator")).to_be_visible()
+    expect(page.locator("#view-customer")).to_be_hidden()
+    page.locator("#view-operator [data-login] input").fill("demo-operator")
+    page.locator("#view-operator [data-login] button").click()
+    item = page.locator(".ho", has_text="HO-0001")
+    expect(item).to_contain_text("high")
+    expect(item).to_contain_text("Third time this month.")
+
+    fake_lm.script(reply=OPERATOR_CARD)
+    item.get_by_role("button", name="Claim").click()
+    expect(page.locator("#handover")).to_contain_text("Martin · QN-100009 · Fiber 500")
+    assist = page.locator("#assist")
+    expect(assist).to_contain_text("An intermittent line fault.")
+    expect(assist.locator("table tr")).to_have_count(4)          # header + C2, C1, C3 from the policy in code
+    expect(assist.locator(".draft")).to_contain_text('<img src=x onerror="window.__xss=1">')
+    assert page.evaluate("window.__xss") is None
+
+    fake_lm.script(("add_case_comment", {"case_ref": "00001001", "text": "Network ticket requested."}),
+                   reply="Comment added to case 00001001.")
+    page.locator("#operatorChat textarea").fill("Add a case comment that we asked the network team.")
+    page.locator("#operatorChat textarea").press("Enter")
+    expect(page.locator("#operatorLog .msg.bot:not(.typing)")).to_contain_text("Comment added")
+    expect(page.locator("#operatorLog .tool")).to_have_text(["add_case_comment"])
+
+    page.locator("#closeNote").fill("Network ticket opened; customer called back.")
+    page.get_by_role("button", name="Close handover").click()
+    expect(page.locator("#handover")).to_contain_text("HO-0001 closed; the note was added to case 00001001.")
+    expect(page.locator("#queue")).to_contain_text("No open handovers.")
+    assert get_crm().get_case("00001001").comments[-1]["body"].endswith("Network ticket opened; customer called back.")
+
+
+def test_a_technician_uses_the_helpdesk_tab_but_not_the_queue(page, app_url, fake_lm):
+    page.goto(f"{app_url}/#helpdesk")
+    page.locator("#view-helpdesk [data-login] input").fill("demo-technician")
+    page.locator("#view-helpdesk [data-login] button").click()
+    expect(page.locator("#view-helpdesk [data-whoami]")).to_contain_text("(technician)")
+    fake_lm.script(("search_kb", {"query": "PPPoE factory reset"}), reply="See INT-06: provisioning pushes it.")
+    page.locator("#view-helpdesk textarea").fill("How do I fix PPPoE after a factory reset?")
+    page.locator("#view-helpdesk textarea").press("Enter")
+    reply = page.locator("#helpdeskLog .msg.bot:not(.typing)")
+    expect(reply).to_contain_text("provisioning pushes it")
+    expect(reply.locator(".source").first).to_contain_text("INT-06")
+    page.click("nav >> text=Operator console")
+    expect(page.locator("#queue")).to_contain_text("needs the operator role")

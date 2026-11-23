@@ -11,8 +11,13 @@
         --ok: #5fb37a; --warn: #e8b33d; --bad: #e06c5a; --user: #23404a;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; }
-    .app { display: grid; grid-template-columns: minmax(380px, 1.4fr) minmax(300px, 1fr); height: 100vh; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+    nav.tabs { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
+    nav.tabs a { color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 8px; font-size: 14px; }
+    nav.tabs a[aria-current="page"] { color: var(--text); background: var(--panel-2); }
+    .view { flex: 1; min-height: 0; }
+    .view[hidden] { display: none; }
+    .app { display: grid; grid-template-columns: minmax(380px, 1.4fr) minmax(300px, 1fr); height: 100%; }
     .chat { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 0; }
     header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
     header h1 { font-size: 18px; margin: 0; }
@@ -64,10 +69,42 @@
     th { color: var(--muted); font-weight: 500; }
     td.mono { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
     .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    /* staff views */
+    .staff { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.6fr); height: 100%; }
+    .staff > section { overflow-y: auto; padding: 18px 20px; min-height: 0; }
+    .staff > section + section { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+    .staff h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+    .login { display: flex; gap: 8px; margin-bottom: 10px; }
+    .login input, .close-form input { flex: 1; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: inherit; }
+    .ho { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
+    .ho.selected { border-color: var(--accent); }
+    .ho .top { display: flex; gap: 8px; align-items: center; }
+    .ho .view-ho { margin-left: auto; }
+    .badge.high { border-color: var(--bad); color: var(--bad); }
+    .badge.claimed { border-color: var(--accent); color: var(--accent); }
+    .muted { color: var(--muted); font-size: 13px; }
+    .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 12px 0; background: var(--panel); }
+    .card dl + h3, .card dl + table { margin-top: 14px; }
+    .card h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .card dl { margin: 0; display: grid; grid-template-columns: 130px 1fr; gap: 6px 10px; font-size: 14px; }
+    .card dt { color: var(--muted); }
+    .card dd { margin: 0; white-space: pre-wrap; }
+    .card .draft { margin-top: 10px; padding: 10px; border-left: 3px solid var(--warn); background: #0b1015; white-space: pre-wrap; font-size: 14px; }
+    .spinner { color: var(--muted); }
+    .spinner::before { content: "◌ "; display: inline-block; animation: pulse 1s infinite; }
+    .staff-log { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+    .staff-form { display: flex; gap: 8px; }
+    .staff-form textarea { height: 46px; }
+    .close-form { display: flex; gap: 8px; margin-top: 12px; }
 </style>
 </head>
 <body>
-<div class="app">
+<nav class="tabs" aria-label="Views">
+    <a href="#customer" data-view="customer">Customer</a>
+    <a href="#operator" data-view="operator">Operator console</a>
+    <a href="#helpdesk" data-view="helpdesk">Helpdesk</a>
+</nav>
+<div class="view app" id="view-customer">
     <section class="chat">
         <header>
             <div>
@@ -107,6 +144,56 @@
         </table>
         <p class="note">Fictional accounts for trying the scenarios. Nothing is filled in automatically.</p>
     </aside>
+</div>
+
+<div class="view staff" id="view-operator" hidden>
+    <section>
+        <h2>Staff sign-in</h2>
+        <form class="login" data-login>
+            <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
+            <button class="ghost" type="submit">Sign in</button>
+        </form>
+        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <h2>Handover queue</h2>
+        <div id="queue"><p class="muted">Sign in as an operator to see the queue.</p></div>
+        <button class="ghost" id="refreshQueue" type="button">Refresh</button>
+    </section>
+    <section>
+        <div id="handover"><p class="muted">Claim a handover to see its summary and the assist.</p></div>
+        <div id="operatorChat" hidden>
+            <h2>Ask the helpdesk agent</h2>
+            <div class="staff-log" id="operatorLog" aria-live="polite"></div>
+            <form class="staff-form" data-chat="operatorLog">
+                <textarea aria-label="Message to the helpdesk agent" placeholder="e.g. Add a case comment that we opened a network ticket."></textarea>
+                <button class="primary" type="submit">Send</button>
+            </form>
+            <form class="close-form" id="closeForm">
+                <input id="closeNote" aria-label="Closing note" placeholder="What was done (added to the case)">
+                <button class="ghost" type="submit">Close handover</button>
+            </form>
+        </div>
+    </section>
+</div>
+
+<div class="view staff" id="view-helpdesk" hidden>
+    <section>
+        <h2>Staff sign-in</h2>
+        <form class="login" data-login>
+            <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
+            <button class="ghost" type="submit">Sign in</button>
+        </form>
+        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <p class="note">Operators read the internal policies, technicians the internal technical notes. Every look at a
+            customer's data is written to the audit log.</p>
+    </section>
+    <section>
+        <h2>Helpdesk agent</h2>
+        <div class="staff-log" id="helpdeskLog" aria-live="polite"></div>
+        <form class="staff-form" data-chat="helpdeskLog">
+            <textarea aria-label="Message to the helpdesk agent" placeholder="e.g. How do I fix PPPoE after a factory reset?"></textarea>
+            <button class="primary" type="submit">Send</button>
+        </form>
+    </section>
 </div>
 <script>
 const messages = document.getElementById('messages');
@@ -347,7 +434,242 @@ document.getElementById('newChat').addEventListener('click', async () => {
     addMessage('bot', 'Hello! I am LineCare, Quillnet\'s support assistant. How can I help?');
 });
 
+// --- Tabs (address hash) ---
+function showView() {
+    const name = (location.hash || '#customer').slice(1);
+    const view = ['customer', 'operator', 'helpdesk'].includes(name) ? name : 'customer';
+    for (const node of document.querySelectorAll('.view')) node.hidden = node.id !== `view-${view}`;
+    for (const link of document.querySelectorAll('nav.tabs a')) {
+        if (link.dataset.view === view) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+    }
+    if (view === 'operator') loadQueue();
+}
+window.addEventListener('hashchange', showView);
+
+// --- Staff: sign-in, helpdesk chat, operator queue ---
+let staff = null, selected = null, assistTimer = null;
+
+async function api(url, options) {
+    const response = await fetch(url, options);
+    let data = {};
+    try { data = await response.json(); } catch { /* empty body */ }
+    return {ok: response.ok, status: response.status, data};
+}
+
+function renderWhoami() {
+    for (const node of document.querySelectorAll('[data-whoami]')) {
+        node.textContent = staff ? `Signed in as ${staff.staff_id} (${staff.role}).`
+                                 : 'Demo tokens: demo-operator, demo-technician (demo authentication only).';
+    }
+}
+
+for (const form of document.querySelectorAll('[data-login]')) {
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const field = form.querySelector('input');
+        const result = await api('/api/staff/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                      body: JSON.stringify({token: field.value})});
+        field.value = '';
+        staff = result.ok ? result.data : null;
+        renderWhoami();
+        if (!result.ok) form.nextElementSibling.textContent = result.data.message || 'Sign-in failed.';
+        loadQueue();
+    });
+}
+
+function staffMessage(logId, role, text, toolCalls, isError) {
+    const log = document.getElementById(logId);
+    const bubble = el('div', `msg ${role}${isError ? ' error' : ''}`, text);
+    if (toolCalls && toolCalls.length) {
+        const tools = el('div', 'tools');
+        for (const call of toolCalls) {
+            const status = /^[a-z_]+$/.test(call.status) ? call.status : 'unknown';
+            const chip = el('span', `tool ${status}`, call.name);
+            chip.title = call.summary || status;
+            tools.appendChild(chip);
+        }
+        bubble.appendChild(tools);
+        addSources(bubble, toolCalls);
+    }
+    log.appendChild(bubble);
+    bubble.scrollIntoView({block: 'end'});
+    return bubble;
+}
+
+for (const form of document.querySelectorAll('[data-chat]')) {
+    const area = form.querySelector('textarea');
+    const button = form.querySelector('button');
+    area.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); }
+    });
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const text = area.value.trim();
+        if (!text || button.disabled) return;
+        area.value = '';
+        const logId = form.dataset.chat;
+        staffMessage(logId, 'user', text);
+        const typing = staffMessage(logId, 'bot typing', 'Looking it up…');
+        button.disabled = true;
+        const result = await api('/api/helpdesk/chat', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                        body: JSON.stringify({text})});
+        typing.remove();
+        button.disabled = false;
+        if (!result.ok) { staffMessage(logId, 'bot', result.data.message || 'Something went wrong.', [], true); return; }
+        staffMessage(logId, 'bot', result.data.reply, result.data.tool_calls);
+    });
+}
+
+async function loadQueue() {
+    const box = document.getElementById('queue');
+    if (!staff) { box.replaceChildren(el('p', 'muted', 'Sign in as an operator to see the queue.')); return; }
+    if (staff.role !== 'operator') {
+        box.replaceChildren(el('p', 'muted', 'The queue needs the operator role. Use the Helpdesk tab.'));
+        return;
+    }
+    const result = await api('/api/operator/handovers');
+    box.replaceChildren();
+    const open = (result.data.handovers || []).filter((h) => h.status !== 'closed');
+    if (!open.length) { box.appendChild(el('p', 'muted', 'No open handovers.')); return; }
+    for (const h of open) {
+        const item = el('div', `ho${selected === h.handover_id ? ' selected' : ''}`);
+        item.dataset.handover = h.handover_id;
+        const top = el('div', 'top');
+        top.appendChild(el('strong', '', h.handover_id));
+        top.appendChild(el('span', `badge ${h.priority}`, h.priority));
+        top.appendChild(el('span', `badge ${h.status}`, h.status));
+        if (h.status === 'queued') {
+            const claim = el('button', 'ghost view-ho', 'Claim');
+            claim.type = 'button';
+            claim.addEventListener('click', () => claimHandover(h));
+            top.appendChild(claim);
+        } else if (h.claimed_by === staff.staff_id) {
+            const view = el('button', 'ghost view-ho', 'Open');
+            view.type = 'button';
+            view.addEventListener('click', () => showHandover(h));
+            top.appendChild(view);
+        }
+        item.appendChild(top);
+        item.appendChild(el('div', 'muted', `${h.first_name || 'Unverified caller'} · ${h.reason.replace(/_/g, ' ')} · ` +
+                                            `waiting ${h.waiting_min} min`));
+        if (h.customer_view) item.appendChild(el('div', '', h.customer_view));
+        box.appendChild(item);
+    }
+}
+
+async function claimHandover(h) {
+    const result = await api(`/api/operator/handovers/${encodeURIComponent(h.handover_id)}/claim`, {method: 'POST'});
+    if (!result.ok) { alert(result.data.message || 'Could not claim.'); loadQueue(); return; }
+    h.status = 'claimed';
+    h.claimed_by = staff.staff_id;
+    showHandover(h);
+    loadQueue();
+}
+
+function factList(title, rows) {
+    const card = el('div', 'card');
+    card.appendChild(el('h3', '', title));
+    const list = el('dl');
+    for (const [label, value] of rows) {
+        if (value === null || value === undefined || value === '') continue;
+        list.appendChild(el('dt', '', label));
+        list.appendChild(el('dd', '', value));
+    }
+    card.appendChild(list);
+    return card;
+}
+
+function showHandover(h) {
+    selected = h.handover_id;
+    const s = h.summary;
+    const box = document.getElementById('handover');
+    box.replaceChildren();
+    box.appendChild(factList(`Handover ${h.handover_id}`, [
+        ['Customer', s.customer.first_name ? `${s.customer.first_name} · ${s.customer.account_no} · ${s.customer.plan}`
+                                           : 'not verified'],
+        ['Reason', `${h.reason.replace(/_/g, ' ')} (${h.priority} priority)`],
+        ['Customer says', s.issue.customer_view],
+        ['Checks', s.checks.map((c) => `${c.tool}: ${c.result}`).join('\n')],
+        ['Actions', s.actions.map((c) => `${c.tool}: ${c.result}`).join('\n')],
+        ['Case', s.open_case_ref],
+        ['Sentiment', s.sentiment],
+        ['Language', s.language],
+    ]));
+    const assist = el('div', 'card');
+    assist.id = 'assist';
+    assist.appendChild(el('h3', '', 'Assist'));
+    assist.appendChild(el('div', 'spinner', 'The helpdesk agent is preparing the assist…'));
+    box.appendChild(assist);
+    document.getElementById('operatorChat').hidden = false;
+    document.getElementById('operatorLog').replaceChildren();
+    pollAssist(h.handover_id);
+}
+
+function renderAssist(data) {
+    const assist = document.getElementById('assist');
+    assist.replaceChildren(el('h3', '', 'Assist'));
+    if (data.status === 'failed' || !data.card) {
+        assist.appendChild(el('p', 'muted', 'The assist could not be prepared (is the model loaded?). You can still ask the helpdesk agent below.'));
+        return;
+    }
+    const card = data.card;
+    const labels = [['Summary', 'summary'], ['Likely cause', 'likely_cause'], ['Compensation', 'compensation'],
+                    ['Next step', 'next_step']];
+    const list = el('dl');
+    for (const [label, key] of labels) {
+        if (!card.card[key]) continue;
+        list.appendChild(el('dt', '', label));
+        list.appendChild(el('dd', '', card.card[key]));
+    }
+    if (!list.childElementCount) list.appendChild(el('dd', '', card.text));
+    assist.appendChild(list);
+    // Credits from the compensation policy in code: shown from the tool results, not from the model's text.
+    if (card.compensation.length) {
+        const table = el('table');
+        const head = el('tr');
+        for (const label of ['Rule', 'Event', 'Eligible', 'EUR']) head.appendChild(el('th', '', label));
+        table.appendChild(head);
+        for (const c of card.compensation) {
+            const row = el('tr');
+            for (const value of [c.rule_id, c.event, c.eligible, c.amount_eur]) row.appendChild(el('td', '', String(value ?? '')));
+            row.title = c.explanation || '';
+            table.appendChild(row);
+        }
+        assist.appendChild(el('h3', '', 'Policy results (computed in code)'));
+        assist.appendChild(table);
+    }
+    if (card.card.draft_reply) assist.appendChild(el('div', 'draft', card.card.draft_reply));
+    if (card.sources.length) assist.appendChild(el('p', 'note', `Sources: ${card.sources.join(', ')}`));
+}
+
+async function pollAssist(handoverId) {
+    clearTimeout(assistTimer);
+    const result = await api(`/api/operator/handovers/${encodeURIComponent(handoverId)}/assist`);
+    if (selected !== handoverId) return;
+    if (result.ok && result.data.status === 'pending') { assistTimer = setTimeout(() => pollAssist(handoverId), 1000); return; }
+    renderAssist(result.ok ? result.data : {status: 'failed'});
+}
+
+document.getElementById('refreshQueue').addEventListener('click', loadQueue);
+document.getElementById('closeForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const note = document.getElementById('closeNote');
+    const result = await api(`/api/operator/handovers/${encodeURIComponent(selected)}/close`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({note: note.value})});
+    if (!result.ok) { alert(result.data.message || 'Could not close.'); return; }
+    note.value = '';
+    document.getElementById('handover').replaceChildren(el('p', 'muted', `${selected} closed; the note was added to case ${result.data.case_ref || '(none)'}.`));
+    document.getElementById('operatorChat').hidden = true;
+    selected = null;
+    loadQueue();
+});
+
 (async () => {
+    showView();
+    const me = await api('/api/staff/me');
+    staff = me.ok ? me.data : null;
+    renderWhoami();
+    if (location.hash === '#operator') loadQueue();
     addMessage('bot', 'Hello! I am LineCare, Quillnet\'s support assistant. How can I help?');
     const data = await (await fetch('/api/customer/state')).json();
     renderState(data.state);

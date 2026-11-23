@@ -5,21 +5,26 @@
 A support agent (chat and voice) for **Quillnet**, a fictional broadband and TV operator. It verifies the caller,
 diagnoses the line and the router through the operator's (mock) systems, explains outages and bills, answers from
 the help articles with visible sources, opens CRM cases, books technician visits and hands over to a person with a
-summary, in English and Bulgarian.
+summary, in English and Bulgarian. Staff take over in an **operator console**: a handover queue, an assist card
+prepared by an internal **helpdesk agent** (likely cause, next step from the internal procedures, credits computed
+by the compensation policy in code, a draft reply), and a chat with that agent. Cases go to a SQLite CRM or to
+**Salesforce**.
 
 **The model decides what to try; the code decides what is allowed.** The identity gate, the two-step confirmation
 for actions, technician eligibility, the filter that keeps internal documents away from customers and the redaction
 of PINs and dates of birth are enforced in Python, and measured with real-model evals.
 
-> All companies, customers, documents and systems here are fictional. Work in progress: the customer side is
-> built; a Salesforce adapter is in place; an internal helpdesk agent and an operator console are next
-> ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
+> All companies, customers, documents and systems here are fictional. Work in progress: the customer agent, the
+> Salesforce adapter, the helpdesk agent and the operator console are built; the full eval suite for the helpdesk
+> side, a metrics tab and ElevenLabs voices are next ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
 
 ![Sequence diagram of one customer turn](linecare_diagram.svg)
 
 ![A line fault: checks, a CRM case and a technician visit booked after the customer confirmed](docs/screenshots/01-line-fault-technician.png)
 
 ![An answer from the help articles, with the source passage opened](docs/screenshots/02-wifi-answer-with-source.png)
+
+![Operator console: a repeat caller's handover, the assist card with the credits computed in code, and the helpdesk agent refusing to promise more](docs/screenshots/04-operator-console.png)
 
 ## What it does
 
@@ -33,20 +38,37 @@ of PINs and dates of birth are enforced in Python, and measured with real-model 
 | "Only my laptop has no internet" | line and router fine → device steps from the help article; records whether it worked |
 | "Can I pay in cash?" | answers from the payment article, with the source; says "I don't have that information" when no article covers a question |
 | "Put me through to a human" | hands over at once, also before verification, with a summary built from the checks |
+| "Third time this month!" (repeat caller) | sees the earlier cases in the CRM at verification, offers a colleague, hands over with high priority |
+| "I pressed reset, now no internet" (wrong router setting) | router configuration error → case and handover in the same turn; staff push the settings |
+| "Wi-Fi is slow" (crowded channel) | offers to move the band to a less crowded channel; changes it only after "yes" |
+
+| Staff member does | What happens |
+|---|---|
+| operator claims a handover | the assist card appears in about 15 s: summary, likely cause, next step from the internal procedure, credits from the policy (C1-C4), a draft reply to review |
+| "Can I promise him 25 EUR?" | no: only what the compensation tool returned, and the goodwill part needs a team lead |
+| technician asks about PPPoE after a factory reset | answers from the internal technical note; operators cannot read technical notes, technicians cannot read policies or compute credits |
+| operator closes the handover | the closing note is added to the CRM case; every look at customer data is in the audit log |
 
 The demo accounts and their PINs are listed in the app.
 
 ## How it is built
 
-- **Tool loop** (`linecare/agents/`): the model calls 12 tools through a dispatcher that checks the allow-list and
-  the session state, drops arguments a tool does not declare, and never raises.
+- **Tool loop** (`linecare/agents/`): the customer agent has 13 tools, the helpdesk agent 7 (6 for technicians).
+  Every call goes through a dispatcher that checks the allow-list for the agent or role and the session state, drops
+  arguments a tool does not declare, and never raises.
 - **Session state machine** (`linecare/session.py`): unverified → verified → handed over, a 15-minute lock after
-  three wrong PINs, and **pending confirmations**: a restart or a booking runs only with a confirmation id from an
-  earlier user turn.
+  three wrong PINs (counted per conversation and per account number), and **pending confirmations**: a restart, a
+  channel change or a booking runs only with a confirmation id from an earlier user turn.
 - **Knowledge base** (`linecare/kb/`): Markdown articles, ONNX embeddings on the CPU (multilingual MiniLM, chosen by
   measurement), Chroma, and search with the audience fixed in code plus a second check in Python. A canary document
   and a poisoned article test that nothing internal or injected gets through.
-- **Business rules** (`linecare/policy/`): when a technician may be booked, handover priority.
+- **Business rules** (`linecare/policy/`): when a technician may be booked, handover priority, and the
+  **compensation policy** (C1-C4: outages over 24 h, missed visits, repeat faults, suspended accounts), whose numbers
+  a test checks against the internal policy document.
+- **Helpdesk agent and operator console** (`linecare/agents/helpdesk.py`, `linecare/handover_queue.py`): demo staff
+  tokens select a role; operators read internal policies, technicians internal technical notes. For the assist,
+  code loads the facts first (handover, customer overview, every credit on record, the procedure for the handover
+  reason) and the model explains them. A case lost in a CRM outage is written when the CRM is back.
 - **CRM** (`linecare/crm/`): one interface, two backends: a SQLite fake and **Salesforce** over its REST API
   (plain `httpx`, OAuth client credentials, Contacts upserted by account number, Cases, CaseComments). The same
   contract tests run against the fake, against an in-process fake of the Salesforce API, and against a real org.
@@ -60,17 +82,21 @@ Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 | | |
 |---|---|
-| Real-model evals | 25 conversations in 7 groups: **Gemma 4 26B 49/50** (2 runs), **Qwen 3.8 27B 25/25**; leakage group on Qwen twice: 10/10 |
-| Leaks | **0**: no internal text, canary string or discount code reached a reply or the model |
-| Retrieval | hit@4 **100%** on 24 English and Bulgarian questions; all 9 out-of-scope questions rejected |
-| Tests | 212 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
+| Real-model evals (customer agent) | 28 conversations in 7 groups: **Gemma 4 26B 28/28** after the helpdesk phase (25 of them earlier: Gemma 49/50 in 2 runs, Qwen 3.8 27B 25/25; leakage group on Qwen twice: 10/10) |
+| Leaks | **0**: no internal text, canary string or discount code reached a customer reply or the customer agent |
+| Retrieval | 32 answerable and 9 unanswerable EN/BG questions: hit@1 **94%**, hit@4 **100%**; 39 of 41 classified right at the threshold (two answerable questions score too low, see the [architecture notes](docs/ARCHITECTURE.md#84-embeddings)) |
+| Tests | 274 (unit, API, Playwright), **96%** line coverage, no GPU or network needed |
 
 **How the numbers got there.** Every failure the evals found was first reproduced (an eval or a test), then fixed
 in code and measured again. In the first runs Gemma offered a router restart in words only (so the customer had to
 agree twice), told customers to "please wait" and stopped, missed a suspended account, answered an English message
 in Bulgarian because the customer's name was Cyrillic, re-listed visit windows after "the earliest is fine", and
-asked "may I record this as resolved?" instead of recording it. Each fix moved the hint next to the data the model
-reads (a `next_step` in the tool result, a line in the conversation state). Full tables:
+asked "may I record this as resolved?" instead of recording it. In the helpdesk phase the new evals found a repeat
+caller offered a colleague late or never and, in Bulgarian, a promised case and handover that were never called
+(2/6 → 6/6). Each fix moved the hint next to the data the model reads (a `next_step` in the tool result, a line in
+the conversation state). Live runs of the operator flow found the assist searching the public articles instead of
+the internal procedure (now loaded by code) and the helpdesk agent adding up credits on its own (now forbidden;
+0 of 4 runs after the fix). Full tables:
 [evals/results/latest.md](evals/results/latest.md), [retrieval.md](evals/results/retrieval.md).
 
 ## Quick start
@@ -82,7 +108,9 @@ reads (a `next_step` in the tool result, a line in the conversation state). Full
    pip install -r requirements.txt
    uvicorn server:app --host 127.0.0.1 --port 8002
    ```
-3. Open `http://localhost:8002` and pick a demo account from the right panel.
+3. Open `http://localhost:8002` and pick a demo account from the right panel. Staff views: the **Operator
+   console** and **Helpdesk** tabs, with the demo tokens `demo-operator` and `demo-technician` (change them with
+   `STAFF_TOKENS`). Try QN-100009 (a repeat caller) in the customer tab, then claim the handover as an operator.
 
 On the first start the embedding model (about 0.2 GB) is downloaded and the index is built, on the CPU, in under a
 minute. Voice uses faster-whisper on the CPU (downloaded on the first recording) and edge-tts, which sends the reply
@@ -145,9 +173,11 @@ tests/                    unit, API and Playwright tests with fakes
 
 ## Limitations
 
-Fictional data only; cookie sessions without real authentication; one local LLM at a time; the identity lock is
-per conversation; edge-tts is an online service; the Salesforce adapter is tested in CI against a fake of its REST API and by hand against a Developer Edition org
-(not in CI: it needs the org's secret).
+Fictional data only; cookie sessions and demo staff tokens, no real authentication; one local LLM at a time;
+edge-tts is an online service; the Salesforce adapter is tested in CI against a fake of its REST API and by hand
+against a Developer Edition org (not in CI: it needs the org's secret); the helpdesk agent has no real-model evals
+yet (asked directly, it does not always check every credit; the assist does, because code loads them); operators
+cannot write into the customer's chat; two answerable questions fall below the retrieval threshold.
 
 ## License
 
