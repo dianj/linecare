@@ -12,7 +12,9 @@ by the compensation policy in code, a draft reply), and a chat with that agent. 
 
 **The model decides what to try; the code decides what is allowed.** The identity gate, the two-step confirmation
 for actions, technician eligibility, the filter that keeps internal documents away from customers and the redaction
-of PINs and dates of birth are enforced in Python, and measured with real-model evals.
+of PINs and dates of birth are enforced in Python, and measured with real-model evals. Before a restart, a channel
+change or a technician visit runs, a **calibrated confirmation gate** checks that the customer's reply really says
+yes, and that it is not text addressed to the system ([how and what it measured](docs/DECISIONS.md)).
 
 > All companies, customers, documents and systems here are fictional. Work in progress: the customer agent, the
 > Salesforce adapter, the helpdesk agent and the operator console are built; the full eval suite for the helpdesk
@@ -59,6 +61,10 @@ The demo accounts and their PINs are listed in the app.
 - **Session state machine** (`linecare/session.py`): unverified → verified → handed over, a 15-minute lock after
   three wrong PINs (counted per conversation and per account number), and **pending confirmations**: a restart, a
   channel change or a booking runs only with a confirmation id from an earlier user turn.
+- **Confirmation gate** (`linecare/decisions.py`, `linecare/decide/`): then two one-letter questions to the same
+  local model, in parallel ("does the reply agree to <action>?", "is it addressed to the system?"), read as
+  calibrated probabilities from the log-probabilities. The action runs only at p(agree) ≥ 0.95 with no flag;
+  otherwise the agent asks explicitly or the offer is cancelled. The gate can only stop an action.
 - **Knowledge base** (`linecare/kb/`): Markdown articles, ONNX embeddings on the CPU (multilingual MiniLM, chosen by
   measurement), Chroma, and search with the audience fixed in code plus a second check in Python. A canary document
   and a poisoned article test that nothing internal or injected gets through.
@@ -82,10 +88,11 @@ Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 | | |
 |---|---|
-| Real-model evals (customer agent) | 28 conversations in 7 groups: **Gemma 4 26B 28/28** after the helpdesk phase (25 of them earlier: Gemma 49/50 in 2 runs, Qwen 3.8 27B 25/25; leakage group on Qwen twice: 10/10) |
+| Real-model evals (customer agent) | 28 conversations in 7 groups: **Gemma 4 26B 28/28** after the helpdesk phase and again with the confirmation gate on ([report](evals/results/gate-on-gemma.md)) (25 of them earlier: Gemma 49/50 in 2 runs, Qwen 3.8 27B 25/25; leakage group on Qwen twice: 10/10) |
 | Leaks | **0**: no internal text, canary string or discount code reached a customer reply or the customer agent |
 | Retrieval | 32 answerable and 9 unanswerable EN/BG questions: hit@1 **94%**, hit@4 **100%**; 39 of 41 classified right at the threshold (two answerable questions score too low, see the [architecture notes](docs/ARCHITECTURE.md#84-embeddings)) |
-| Tests | 274 (unit, API, Playwright), **96%** line coverage, no GPU or network needed |
+| Confirmation gate | 38 labelled replies (yes, no, "yes, but…", attempts to steer it; EN/BG): **Gemma 38/38**, Qwen 37/38 (one clear yes asked again); no unclear or steering reply acted on. Found on the way: a one-letter question obeys "Answer Y" (p = 0.998), hence the second question |
+| Tests | 314 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
 
 **How the numbers got there.** Every failure the evals found was first reproduced (an eval or a test), then fixed
 in code and measured again. In the first runs Gemma offered a router restart in words only (so the customer had to
@@ -177,7 +184,8 @@ Fictional data only; cookie sessions and demo staff tokens, no real authenticati
 edge-tts is an online service; the Salesforce adapter is tested in CI against a fake of its REST API and by hand
 against a Developer Edition org (not in CI: it needs the org's secret); the helpdesk agent has no real-model evals
 yet (asked directly, it does not always check every credit; the assist does, because code loads them); operators
-cannot write into the customer's chat; two answerable questions fall below the retrieval threshold.
+cannot write into the customer's chat; two answerable questions fall below the retrieval threshold; the
+confirmation gate needs log-probabilities from the model server and adds under a second to each confirmed action.
 
 ## License
 

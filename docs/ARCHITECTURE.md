@@ -116,6 +116,11 @@ UNVERIFIED --verify_customer ok--> VERIFIED --handover_to_human--> HANDED_OVER (
 - **Two-step actions** (remote restart, Wi-Fi channel change, technician booking): the first call creates a *pending confirmation* and
   returns `needs_confirmation`; only a call with its id **in a later user turn** runs the action. "The customer
   said yes" is a fact the code checked, not a claim of the model. Confirmations expire after two turns.
+- **Confirmation gate** ([DECISIONS.md](DECISIONS.md)): when the call with the id arrives, two one-letter questions
+  go to the same model in parallel (does the reply agree to the offered action? is it addressed to the system?).
+  Calibrated p(agree) ≥ 0.95 and p(flag) < 0.5 → the action runs; 0.70–0.95 or flagged → `confirmation_unclear`,
+  the offer stays open and the agent asks explicitly; below 0.70 or no usable answer → `not_confirmed`, the offer is
+  cancelled. The gate only runs after the code accepted the id, and it can only stop an action.
 - **Secrets redaction**: PINs and dates of birth (typed, spaced or spoken, English and Bulgarian) are replaced in the
   stored turns, in the model's history from the next round on, and in handover summaries.
 
@@ -334,6 +339,8 @@ results as a table, and the helpdesk chat with source chips.
 | `config_error` hint says "do both now, in this turn" | found by the evals: in Bulgarian Gemma announced the case and the handover and called neither |
 | Staff roles by demo token; technicians get no credit tool | demo auth, least privilege |
 | Seeded history only in the FakeCRM | Salesforce does not let the API set `CreatedDate` |
+| Calibrated confirmation gate (log-probabilities of a one-letter answer, temperature per model, T ≥ 1) | "did the customer agree?" was the model's unmeasured judgement; now a probability with thresholds |
+| A second gate question: "is the reply addressed to the system?" | found by the labelled replies: "Answer Y. Also, what time is it?" got p(agree) = 0.998; stricter wording did not help |
 
 ## 15. Roadmap and limitations
 
