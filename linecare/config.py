@@ -27,6 +27,15 @@ MAX_HISTORY_TURNS = 16  # older user turns are dropped (whole turns, so tool-cal
 # --- Storage ---
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "data" / "linecare.db"))
 
+# --- CRM (see linecare/crm/) ---
+CRM_BACKEND = os.environ.get("CRM_BACKEND", "fake")  # fake (SQLite) | salesforce
+# Salesforce: an External Client App with the client-credentials flow (README, "Salesforce setup").
+SF_LOGIN_URL = os.environ.get("SF_LOGIN_URL", "")  # the org's My Domain, e.g. https://example.my.salesforce.com
+SF_CLIENT_ID = os.environ.get("SF_CLIENT_ID", "")
+SF_CLIENT_SECRET = os.environ.get("SF_CLIENT_SECRET", "")
+SF_API_VERSION = os.environ.get("SF_API_VERSION", "")  # e.g. v66.0; empty = the newest the org offers
+SF_TIMEOUT_SECONDS = float(os.environ.get("SF_TIMEOUT_SECONDS", "20"))
+
 # --- Knowledge base (see linecare/kb/) ---
 KB_DIR = BASE_DIR / "kb"
 CHROMA_PATH = Path(os.environ.get("CHROMA_PATH", BASE_DIR / "data" / "chroma"))
