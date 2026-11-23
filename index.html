@@ -126,7 +126,7 @@ function el(tag, className, text) {
     return node;
 }
 
-// Source chips come from the search_help tool results, not from the model's text (spec §8.5).
+// Source chips come from the search_help tool results, not from the model's text (ARCHITECTURE.md §8.5).
 function addSources(bubble, toolCalls) {
     const seen = new Set();
     const sources = [];
@@ -148,7 +148,8 @@ function addSources(bubble, toolCalls) {
             if (open && open.chip === chip) { open = null; return; }
             const panel = el('div', 'passage');
             panel.appendChild(el('strong', '', `${source.title} · ${source.section}`));
-            panel.appendChild(document.createTextNode(source.text));
+            // The articles are wrapped Markdown: join wrapped lines, keep blank lines and list items.
+            panel.appendChild(document.createTextNode(source.text.replace(/([^\n])\n(?![\n-])/g, '$1 ')));
             bubble.appendChild(panel);
             chip.setAttribute('aria-expanded', 'true');
             open = {chip, panel};

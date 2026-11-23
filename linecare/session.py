@@ -1,4 +1,4 @@
-"""The customer conversation's state, enforced in code (spec §6.1).
+"""The customer conversation's state, enforced in code (ARCHITECTURE.md §6.1).
 
     UNVERIFIED --verify ok--> VERIFIED --handover--> HANDED_OVER
         | 3 failed attempts

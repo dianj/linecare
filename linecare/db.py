@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS handovers (
     claimed_by TEXT,
     closed_at TEXT
 );
--- FakeCRM: the fields LineCare uses of Salesforce Contact, Case and CaseComment (spec section 9).
+-- FakeCRM: the fields LineCare uses of Salesforce Contact, Case and CaseComment (ARCHITECTURE.md §9).
 CREATE TABLE IF NOT EXISTS crm_contacts (
     contact_id TEXT PRIMARY KEY,
     account_no TEXT NOT NULL UNIQUE,

@@ -1,4 +1,4 @@
-"""CRM backends behind one interface (spec §9). `get_crm()` returns the configured one."""
+"""CRM backends behind one interface (ARCHITECTURE.md §9). `get_crm()` returns the configured one."""
 from linecare.crm.fake import FakeCRM
 
 _crm = FakeCRM()

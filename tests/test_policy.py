@@ -1,4 +1,4 @@
-"""Business rules in code: technician eligibility and escalation priority (spec §6.3)."""
+"""Business rules in code: technician eligibility and escalation priority (ARCHITECTURE.md §6.3)."""
 import pytest
 
 from linecare.crm.base import CaseSummary

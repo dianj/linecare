@@ -1,4 +1,4 @@
-"""The session state machine, the identity lock and the two-step confirmations (spec §6.1)."""
+"""The session state machine, the identity lock and the two-step confirmations (ARCHITECTURE.md §6.1)."""
 from linecare import config
 from linecare.session import LOCKED, UNVERIFIED, VERIFIED
 from linecare.tools.identity import verify_customer

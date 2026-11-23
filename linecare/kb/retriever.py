@@ -1,4 +1,4 @@
-"""Search the knowledge base with access control in code (spec §8.3).
+"""Search the knowledge base with access control in code (ARCHITECTURE.md §8.3).
 
 The caller fixes which audiences may be searched; the customer tool always passes {"public"} and the model has no
 parameter to widen it. Chroma filters on `audience`, and every passage is checked again in Python before it is

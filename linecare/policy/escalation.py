@@ -1,4 +1,4 @@
-"""Handover priority (spec §6.3). The customer may ask for a human at any time; that is never refused."""
+"""Handover priority (ARCHITECTURE.md §6.3). The customer may ask for a human at any time; that is never refused."""
 
 HANDOVER_REASONS = ("customer_request", "cannot_resolve", "config_required", "repeat_contact", "angry_customer",
                     "security_lock", "out_of_scope")

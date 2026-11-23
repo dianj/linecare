@@ -1,4 +1,4 @@
-"""When a technician may be booked (spec §6.3). Decided in code from tool results, never by the model.
+"""When a technician may be booked (ARCHITECTURE.md §6.3). Decided in code from tool results, never by the model.
 
 Allowed when the diagnostics in this conversation found (a) a line fault (`no_sync` or `degraded`), (b) a router
 that stays offline (hardware), or (c) intermittent drops (3 or more in 24 hours). Never during an area outage,

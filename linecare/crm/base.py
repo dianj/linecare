@@ -1,4 +1,4 @@
-"""The CRM interface the tools use. FakeCRM (SQLite) always; SalesforceCRM (REST) from D5 on (spec §9)."""
+"""The CRM interface the tools use. FakeCRM (SQLite) always; SalesforceCRM (REST) from D5 on (ARCHITECTURE.md §9)."""
 from dataclasses import dataclass, field
 from typing import Protocol
 

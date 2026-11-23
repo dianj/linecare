@@ -1,4 +1,4 @@
-"""Handover: allowed in every state, summary built in code, no secrets, conversation stops acting (spec §11)."""
+"""Handover: allowed in every state, summary built in code, no secrets, no further actions (ARCHITECTURE.md §11)."""
 import json
 
 from linecare import db

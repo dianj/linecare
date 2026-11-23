@@ -1,4 +1,4 @@
-"""Knowledge base: documents, chunking, index sync, and access control in code (spec §8)."""
+"""Knowledge base: documents, chunking, index sync, and access control in code (ARCHITECTURE.md §8)."""
 import json
 import logging
 
@@ -204,7 +204,7 @@ def test_the_fake_embedder_scores_shared_words_high():
 
 def test_the_onnx_embedder_loads_lazily_and_uses_the_model_prefixes():
     e5 = OnnxEmbedder("intfloat/multilingual-e5-large")
-    assert e5._model is None and e5.min_score > 0.7  # e5 scores are compressed (spec §8.3)
+    assert e5._model is None and e5.min_score > 0.7  # e5 scores are compressed (ARCHITECTURE.md §8.3)
 
     class Model:
         def embed(self, texts):

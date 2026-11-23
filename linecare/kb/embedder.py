@@ -1,7 +1,7 @@
 """Text embeddings: ONNX models on the CPU (fastembed, no torch) and a deterministic fake for tests and CI.
 
 The CPU keeps the GPU's memory free for the 26-27B chat model. Each model has its own calibrated relevance
-threshold (`min_score`) for the `answerable` rule, measured with evals/retrieval_eval.py (spec §8.3).
+threshold (`min_score`) for the `answerable` rule, measured with evals/retrieval_eval.py (ARCHITECTURE.md §8.3).
 """
 import hashlib
 import math

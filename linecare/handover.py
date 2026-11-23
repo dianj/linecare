@@ -1,4 +1,4 @@
-"""The handover summary a colleague sees (spec §11).
+"""The handover summary a colleague sees (ARCHITECTURE.md §11).
 
 Built in code from the session and the tool log, not written by the model: the model only adds one sentence of
 the customer's view and a suggested next step, and both are redacted. Validated with Pydantic.

@@ -1,4 +1,4 @@
-"""Retrieval quality per embedding model: hit rate and the `answerable` threshold (spec §8.3, §8.4).
+"""Retrieval quality per embedding model: hit rate and the `answerable` threshold (ARCHITECTURE.md §8.3, §8.4).
 
     python evals/retrieval_eval.py [--models m1,m2]
 

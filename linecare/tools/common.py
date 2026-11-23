@@ -27,7 +27,7 @@ def normalise_account_no(raw) -> str | None:
 
 
 def two_step(session, tool: str, arguments: dict, summary: str, confirmation_id, execute) -> dict:
-    """The shared confirmation flow for side-effect tools (spec §6.1).
+    """The shared confirmation flow for side-effect tools (ARCHITECTURE.md §6.1).
 
     Without confirmation_id: store a pending action and ask the model to get the customer's answer.
     With it: run `execute(stored_arguments)` only if the action was offered in an earlier user turn.
