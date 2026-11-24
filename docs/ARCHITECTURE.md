@@ -7,8 +7,8 @@ articles with sources, opens CRM cases, books technician visits and hands over t
 All companies, customers, documents and systems in this repository are fictional. The section numbers below are
 referenced from the code (for example "§6.1" in `linecare/session.py`).
 
-Status: the customer side is built (this document describes it). The internal helpdesk agent, the operator console,
-metrics, ElevenLabs voices and the live Salesforce adapter are planned (§15).
+Status: the customer agent, the helpdesk agent, the operator console, the metrics tab, the Salesforce adapter and
+the ElevenLabs voices are built and described here (§15 for what is left).
 
 ---
 
@@ -182,6 +182,12 @@ procedure for the handover reason. The model then writes five labelled lines (su
 next step, a draft reply marked "review before sending"); the UI shows the credits from the tool results in a
 table, not from the model's text.
 
+**Credit questions in the helpdesk chat**: for operators the overview also lists `compensation_checks`, one
+`calculate_compensation` call per event on record (the same list the assist uses). When an operator's message names
+an account and asks about money (EN/BG words), code runs the overview and every check before the model answers, the
+same way as for the assist. Found by the D4 evals: asked directly, Gemma checked two of three events, or offered to
+check instead of checking; a prompt rule alone did not change it (0/3), loading the facts in code did (30/30).
+
 **CRM outages**: a case that could not be written is kept in the handover summary (`pending_crm_sync`) and written
 when the app starts again (or the CRM answers), then linked to the handover.
 
@@ -233,8 +239,14 @@ public articles ([results](../evals/results/retrieval.md)):
 e5-large ranked the one Bulgarian article first for most Bulgarian questions, whatever they asked. With the five
 articles added in the helpdesk phase, two answerable questions score below MiniLM's threshold ("Do you store my PIN
 when I chat with you?" and a Bulgarian question about moving house, which has no Bulgarian article), while the
-best-scoring unanswerable question is at 0.458: a lower threshold would answer off-topic questions. Hybrid BM25
-ranking and Bulgarian versions of the articles are the planned fixes. Tests use a
+best-scoring unanswerable question is at 0.458: a lower threshold would answer off-topic questions. Both fail
+safely (the agent says it has no information and offers a case or a colleague). Checked in D4: a Bulgarian version
+of the moving article did not help; the Bulgarian question still scored 0.419 on the English article and the
+Bulgarian one ranked lower, though a sentence quoted from it scores 0.79. The limit is the small model's match for
+the colloquial wording, not a missing article, so it was not kept. Hybrid BM25 was not tried: it was planned for
+misses on model names and error codes, and these are ordinary phrasing; the PIN question (0.362) also scores below
+off-topic questions such as "Who is the CEO of Quillnet?" (0.424), so a fix would need more than a lexical bonus on
+the threshold. Tests use a
 hashing `FakeEmbedder` and an in-memory index.
 
 ### 8.5 Citations
@@ -265,9 +277,15 @@ the README.
   English and Bulgarian (short Bulgarian clips are often labelled Russian otherwise), with a domain prompt.
 - **Spoken account numbers**: "Q N one zero zero zero zero three" / "кю ен едно нула …" / "QN 100 003" →
   `QN-100003`, only when exactly six digits follow (seven heard digits mean a mishearing; the model asks again).
-- **Text-to-speech**: a provider interface with edge-tts (retried, per-attempt timeout) and a fake. Markdown is
-  removed; account and case numbers are read in short digit groups. In voice turns the state block asks for at
-  most two short sentences.
+- **Text-to-speech**: a provider interface with edge-tts (retried, per-attempt timeout), **ElevenLabs** (REST over
+  `httpx`, model `eleven_flash_v2_5`, one retry on 429/5xx, the key never logged; `TTS_PROVIDER=elevenlabs`) and a
+  fake. Markdown is removed; account and case numbers are read in short digit groups. In voice turns the state
+  block asks for at most two short sentences. Both online providers receive the reply text only.
+- **Latency** (`evals/tts_latency.py`, [results](../evals/results/tts-latency.md)): the same four replies (EN/BG,
+  short/medium), three runs each, time to the complete MP3: edge-tts median 1.42 s (slowest 6.51 s, Bulgarian
+  retries), ElevenLabs 0.62 s (slowest 1.35 s). The first male voice tried was not available to a free account
+  (404 `voice_not_found`), found in the live check; the defaults are premade voices
+  (`ELEVENLABS_VOICE_FEMALE`, `ELEVENLABS_VOICE_MALE` change them).
 
 ## 11. Handover summary
 
@@ -295,13 +313,35 @@ pending_crm_sync, kb_sources, sentiment, suggested_next_step, transcript_turns`.
 | `POST /api/operator/handovers/{id}/close` | close with a note that goes to the case (the operator who claimed it) |
 | `POST /api/helpdesk/chat`, `POST /api/helpdesk/reset` | one helpdesk turn (any staff role), new conversation |
 | `GET /api/conversations/{id}` | a stored (redacted) transcript, audited |
+| `GET /api/metrics?from=&to=&model=` | KPIs of the customer conversations (any staff role; dates `YYYY-MM-DD`) |
 | `/mock/...` | the mock systems (OpenAPI at `/docs`) |
 
 The page renders all conversation text with `textContent`. Under each reply: tool chips (status colour, redacted
 arguments on hover) and source chips. Quick-reply buttons ("Yes, go ahead" / "No", or in Bulgarian) appear while a
-confirmation is pending; they only send a normal message. Three tabs follow the address hash (`#customer`,
-`#operator`, `#helpdesk`); the staff views show the queue, the handover summary, the assist card with the policy
-results as a table, and the helpdesk chat with source chips.
+confirmation is pending; they only send a normal message. Four tabs follow the address hash (`#customer`,
+`#operator`, `#helpdesk`, `#metrics`); the staff views show the queue, the handover summary, the assist card with the
+policy results as a table, and the helpdesk chat with source chips.
+
+**Metrics** (`linecare/metrics.py`, read-only queries over the conversation log). The base is every customer
+conversation with at least one message, filtered by start date and model. Outcomes are set by code from tool
+results and only move up (`info` < `resolved` < `case_created` < `technician_booked` < `handover`): `info` when an
+informational article answered (troubleshooting steps wait for the customer's answer in `record_outcome`),
+`resolved` only after a fix in an earlier turn and the customer's confirmation.
+
+| KPI | Definition |
+|---|---|
+| Containment | outcome `resolved` or `info` ÷ base |
+| Escalation | outcome `handover` ÷ base, by handover reason |
+| By scenario | outcomes per demo scenario (S1–S10, set from the demo account at verification; others "other") |
+| Messages to a confirmed fix | mean user turns in `resolved` conversations |
+| Latency | median and p95 per reply: LLM (all rounds), tools, speech to text, and end to end (their sum) |
+| Tool errors | tool calls with `error` / `system_error` ÷ all tool calls |
+| Blocked actions | tool calls refused by a rule in code, by reason (identity, confirmation, gate, policy) |
+| Fixed remotely | a restart or channel change ran and no technician was booked |
+
+The tab draws them as tiles and plain SVG bars (no chart library), lists the last 20 conversations, and opens a
+stored transcript (redacted, audited) on click. Text-to-speech time is not in the latency: the voice reply is a
+separate request made by the browser after the text is shown.
 
 ## 13. Quality
 
@@ -344,8 +384,9 @@ results as a table, and the helpdesk chat with source chips.
 
 ## 15. Roadmap and limitations
 
-Planned: the full real-model eval suite for both agents (including the helpdesk and the assist), a metrics tab,
-ElevenLabs voices, hybrid BM25 ranking and Bulgarian versions of more articles.
+Done: the real-model eval suite covers both agents (41 cases, including 10 helpdesk cases run as an operator or a
+technician), the metrics tab (§12) and the ElevenLabs voices (§10) are built. Not pursued, with the reasons in §8.4:
+hybrid BM25 ranking and more Bulgarian articles for the two retrieval misses.
 
 Limitations: fictional data only; demo cookie sessions and demo staff tokens, no real authentication; one LLM at a
 time on a local GPU; edge-tts sends reply text to an online service; operators cannot write to the customer's chat

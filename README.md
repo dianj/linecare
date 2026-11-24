@@ -17,8 +17,8 @@ change or a technician visit runs, a **calibrated confirmation gate** checks tha
 yes, and that it is not text addressed to the system ([how and what it measured](docs/DECISIONS.md)).
 
 > All companies, customers, documents and systems here are fictional. Work in progress: the customer agent, the
-> Salesforce adapter, the helpdesk agent and the operator console are built; the full eval suite for the helpdesk
-> side, a metrics tab and ElevenLabs voices are next ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
+> Salesforce adapter, the helpdesk agent, the operator console, a metrics tab and ElevenLabs voices are built and
+> measured ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
 
 ![Sequence diagram of one customer turn](linecare_diagram.svg)
 
@@ -50,6 +50,7 @@ yes, and that it is not text addressed to the system ([how and what it measured]
 | "Can I promise him 25 EUR?" | no: only what the compensation tool returned, and the goodwill part needs a team lead |
 | technician asks about PPPoE after a factory reset | answers from the internal technical note; operators cannot read technical notes, technicians cannot read policies or compute credits |
 | operator closes the handover | the closing note is added to the CRM case; every look at customer data is in the audit log |
+| team lead opens **Metrics** | containment, escalation by reason, outcomes per scenario, latency per stage (median, p95), blocked actions, the last 20 conversations with their transcripts |
 
 The demo accounts and their PINs are listed in the app.
 
@@ -78,21 +79,26 @@ The demo accounts and their PINs are listed in the app.
 - **CRM** (`linecare/crm/`): one interface, two backends: a SQLite fake and **Salesforce** over its REST API
   (plain `httpx`, OAuth client credentials, Contacts upserted by account number, Cases, CaseComments). The same
   contract tests run against the fake, against an in-process fake of the Salesforce API, and against a real org.
-- **Voice** (`linecare/voice/`): faster-whisper on the CPU, spoken account numbers normalised, edge-tts replies.
+- **Voice** (`linecare/voice/`): faster-whisper on the CPU, spoken account numbers normalised, replies through
+  edge-tts or **ElevenLabs** (`TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY`).
+- **Metrics** (`linecare/metrics.py`): KPIs computed from the conversation log the app already writes; outcomes
+  are set by code from tool results, never from the model's wording.
 - **Mock systems** (`mocks/`): 200 seeded customers, network, diagnostics, billing and scheduling, with a REST API
   at `/mock` (OpenAPI at `/docs`).
 
-Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The problem, KPIs and risks on one page:
+[docs/SOLUTION_BRIEF.md](docs/SOLUTION_BRIEF.md); a 3-minute live demo: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
 ## Results
 
 | | |
 |---|---|
-| Real-model evals (customer agent) | 28 conversations in 7 groups: **Gemma 4 26B 28/28** after the helpdesk phase and again with the confirmation gate on ([report](evals/results/gate-on-gemma.md)) (25 of them earlier: Gemma 49/50 in 2 runs, Qwen 3.8 27B 25/25; leakage group on Qwen twice: 10/10) |
+| Real-model evals (both agents) | 41 conversations in 8 groups (diagnosis, confirmations through the gate, grounding, leakage, policy, handover, identity, and 10 helpdesk cases as an operator or a technician), confirmation gate on: **Gemma 4 26B 82/82** in 2 runs, **Qwen 3.8 27B 40/41** ([report](evals/results/latest.md)); Qwen's one failure was the grader (it read "As for the €50 credit, I'm not able to promise that" as a promise), fixed and re-run: 3/3 on both. Leakage group twice on both models: 10/10 each |
 | Leaks | **0**: no internal text, canary string or discount code reached a customer reply or the customer agent |
+| Voice replies | time to the complete MP3 for the same EN/BG replies: **ElevenLabs 0.62 s** median (slowest 1.35 s), edge-tts 1.42 s (slowest 6.51 s) ([report](evals/results/tts-latency.md)) |
 | Retrieval | 32 answerable and 9 unanswerable EN/BG questions: hit@1 **94%**, hit@4 **100%**; 39 of 41 classified right at the threshold (two answerable questions score too low, see the [architecture notes](docs/ARCHITECTURE.md#84-embeddings)) |
 | Confirmation gate | 38 labelled replies (yes, no, "yes, but…", attempts to steer it; EN/BG): **Gemma 38/38**, Qwen 37/38 (one clear yes asked again); no unclear or steering reply acted on. Found on the way: a one-letter question obeys "Answer Y" (p = 0.998), hence the second question |
-| Tests | 314 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
+| Tests | 328 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
 
 **How the numbers got there.** Every failure the evals found was first reproduced (an eval or a test), then fixed
 in code and measured again. In the first runs Gemma offered a router restart in words only (so the customer had to
@@ -103,7 +109,13 @@ caller offered a colleague late or never and, in Bulgarian, a promised case and 
 (2/6 → 6/6). Each fix moved the hint next to the data the model reads (a `next_step` in the tool result, a line in
 the conversation state). Live runs of the operator flow found the assist searching the public articles instead of
 the internal procedure (now loaded by code) and the helpdesk agent adding up credits on its own (now forbidden;
-0 of 4 runs after the fix). Full tables:
+0 of 4 runs after the fix). The helpdesk evals then found that, asked directly about a customer's credits, Gemma
+checked two of three events or offered to check instead of checking (a prompt rule did not help: 0/3). Now an
+operator's credit question loads the overview and every credit on record in code first, as the assist does
+(30/30). A full run found the model handing a "yes" for the channel change to the restart tool: the code refused
+it, but as "unknown or expired", so the model asked again; the refusal now names the right tool (5/5). The two
+models differ in effort: during a known outage Qwen still tests the line and the router, Gemma stops after the
+outage check (both answer correctly; Qwen's turns take about 25 s against Gemma's 6 s). Full tables:
 [evals/results/latest.md](evals/results/latest.md), [retrieval.md](evals/results/retrieval.md).
 
 ## Quick start
@@ -121,7 +133,8 @@ the internal procedure (now loaded by code) and the helpdesk agent adding up cre
 
 On the first start the embedding model (about 0.2 GB) is downloaded and the index is built, on the CPU, in under a
 minute. Voice uses faster-whisper on the CPU (downloaded on the first recording) and edge-tts, which sends the reply
-text to Microsoft's online voices. `FROZEN_NOW=2026-11-20T10:00:00` gives the same demo times on every start.
+text to Microsoft's online voices; with `TTS_PROVIDER=elevenlabs` and a key restricted to Text to Speech, ElevenLabs
+instead. `FROZEN_NOW=2026-11-20T10:00:00` gives the same demo times on every start.
 
 ## Salesforce (optional)
 
@@ -165,6 +178,7 @@ every run. The real-model evals need LM Studio:
 python evals/run_evals.py --models gemma-4-26b-a4b-it qwen3.8-27b --repeats 2 1
 python evals/run_evals.py --models qwen3.8-27b --groups leakage --repeat 2 --output leakage-qwen
 python evals/retrieval_eval.py            # embedding models compared, no LLM needed
+python evals/tts_latency.py               # edge-tts vs ElevenLabs (needs network; ELEVENLABS_API_KEY)
 ```
 
 ## Project layout
@@ -181,11 +195,13 @@ tests/                    unit, API and Playwright tests with fakes
 ## Limitations
 
 Fictional data only; cookie sessions and demo staff tokens, no real authentication; one local LLM at a time;
-edge-tts is an online service; the Salesforce adapter is tested in CI against a fake of its REST API and by hand
-against a Developer Edition org (not in CI: it needs the org's secret); the helpdesk agent has no real-model evals
-yet (asked directly, it does not always check every credit; the assist does, because code loads them); operators
-cannot write into the customer's chat; two answerable questions fall below the retrieval threshold; the
-confirmation gate needs log-probabilities from the model server and adds under a second to each confirmed action.
+both voice providers are online services (they receive the reply text); the Salesforce adapter is tested in CI against a fake of its REST API and by hand
+against a Developer Edition org (not in CI: it needs the org's secret); a credit question is recognised by an
+account number and a money word, so one without an account number is left to the model; operators cannot write
+into the customer's chat; two answerable questions fall below the retrieval threshold (they fail safely: "no
+information", a case or a colleague; a Bulgarian article was tried and did not fix them, see the
+[notes](docs/ARCHITECTURE.md#84-embeddings)); the confirmation gate needs log-probabilities from the model server
+and adds under a second to each confirmed action.
 
 ## License
 
