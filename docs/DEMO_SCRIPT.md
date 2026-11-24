@@ -1,6 +1,6 @@
 # LineCare: live demo script (about 3 minutes)
 
-For showing the app live, for example in an interview. Everything runs locally: LM Studio with
+For showing the app live, for example in a meeting or a review. Everything runs locally: LM Studio with
 `gemma-4-26b-a4b-it`, then `uvicorn server:app --port 8002` with `FROZEN_NOW=2026-11-20T10:00:00` (the same demo
 times on every start). The demo accounts and PINs are in the right panel of the Customer tab.
 
