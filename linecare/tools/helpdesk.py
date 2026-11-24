@@ -11,7 +11,7 @@ from linecare.crm import get_crm
 from linecare.crm.base import CRMUnavailable
 from linecare.kb import retriever
 from linecare.policy import compensation
-from linecare.staff import ROLE_INTERNAL_GROUPS
+from linecare.staff import OPERATOR, ROLE_INTERNAL_GROUPS
 from linecare.tools.common import error, normalise_account_no, ok
 from linecare.tools.handover import get_handover as load_handover
 from mocks import clock
@@ -88,7 +88,23 @@ def get_customer_overview(staff, account_no: str, reason: str) -> dict:
     }
     if crm_note:
         overview["note"] = crm_note
+    if staff.role == OPERATOR:
+        overview["compensation_checks"] = compensation_checks(account, overview)
+        overview["message"] = ("For a question about credits, call calculate_compensation once for each entry in "
+                               "compensation_checks and report each result separately (no total).")
     return ok(**overview)
+
+
+def compensation_checks(account: str, overview: dict) -> list[dict]:
+    """The calculate_compensation calls the records call for: the missed visit, each resolved outage of the last
+    60 days, each case category with enough repeat cases. It only lists the questions; the policy answers them."""
+    checks = [{"account_no": account, "event": "technician_no_show"} for _ in overview["missed_visits"][:1]]
+    checks += [{"account_no": account, "event": "outage", "outage_id": o["outage_id"]}
+               for o in overview["outages_last_60_days"]]
+    categories = [c["category"] for c in overview["last_cases"]]
+    checks += [{"account_no": account, "event": "repeat_fault", "category": category}
+               for category in dict.fromkeys(categories) if categories.count(category) >= compensation.REPEAT_CASES]
+    return checks
 
 
 def get_case(staff, case_ref: str) -> dict:

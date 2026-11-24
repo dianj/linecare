@@ -14,12 +14,11 @@ from linecare import db
 from linecare.agents.loop import run_tool_loop, trim_history
 from linecare.agents.prompts import ASSIST_REQUEST, build_helpdesk_prompt
 from linecare.language import NAMES as LANGUAGE_NAMES
-from linecare.policy.compensation import REPEAT_CASES
 from linecare.registry import ALLOWED, execute_tool_call
 from linecare.staff import OPERATOR
 from linecare.tool_schemas import HELPDESK_TOOLS
 from linecare.tools.handover import get_handover as load_handover
-from linecare.tools.helpdesk import summary_line
+from linecare.tools.helpdesk import compensation_checks, summary_line
 
 CAP_REACHED_REPLY = "Sorry, I could not finish that. Please ask again in smaller steps."
 # The internal procedure to look up for each handover reason (operators read the policy documents). Found in a live
@@ -37,6 +36,9 @@ CARD_LABELS = {"SUMMARY": "summary", "LIKELY CAUSE": "likely_cause", "COMPENSATI
                "NEXT STEP": "next_step", "DRAFT REPLY": "draft_reply"}
 # "SUMMARY:", also as "**Summary:**" or "- Summary:" (models add Markdown).
 LABEL_LINE = re.compile(rf"^[\W_]*({'|'.join(CARD_LABELS)})[*_\s]*:[*_\s]*", re.M | re.I)
+ACCOUNT_IN_TEXT = re.compile(r"\bQN[\s-]?(\d{6})\b", re.I)
+MONEY_WORDS = re.compile(r"compensat|credit|refund|money|goodwill|\beur\b|€|компенсац|кредит|обезщет|пари|"
+                         r"възстанов|отстъпк|евро", re.I)
 
 
 @dataclass
@@ -90,7 +92,43 @@ def run_helpdesk_turn(staff, text: str, model: str) -> HelpdeskResult:
     """One message from a staff member. If the model call fails, the exception propagates; history is unchanged."""
     staff.turn += 1
     history = list(staff.history) + [{"role": "user", "content": text}]
-    return _run(staff, history, model, _Executor(staff), text)
+    executor = _Executor(staff)
+    _preload_credit_facts(staff, history, executor, text)
+    return _run(staff, history, model, executor, text)
+
+
+def _preload(history: list, executor: _Executor, calls: list[tuple[str, dict]]) -> list[dict]:
+    """Run tool calls in code and put them into the history as if the model had made them."""
+    if not calls:
+        return []
+    ids = [f"pre-{len(executor.calls) + i + 1}" for i in range(len(calls))]
+    history.append({"role": "assistant", "content": "", "tool_calls": [
+        {"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+        for call_id, (name, args) in zip(ids, calls, strict=True)]})
+    results = []
+    for call_id, (name, args) in zip(ids, calls, strict=True):
+        content = executor(name, json.dumps(args))
+        history.append({"role": "tool", "tool_call_id": call_id, "content": content})
+        results.append(json.loads(content))
+    return results
+
+
+def credit_question_account(text: str) -> str | None:
+    """The account an operator's message asks about money for, or None."""
+    account = ACCOUNT_IN_TEXT.search(text)
+    return f"QN-{account.group(1)}" if account and MONEY_WORDS.search(text) else None
+
+
+def _preload_credit_facts(staff, history: list, executor: _Executor, text: str) -> None:
+    """A credit question from an operator: code loads the overview and every credit on record first. Found in the
+    D4 evals: asked directly, Gemma checked two of three events, or offered to check instead of checking."""
+    account = credit_question_account(text) if staff.role == OPERATOR else None
+    if account is None:
+        return
+    reason = f"operator asked about credits: {' '.join(text.split())[:120]}"
+    overview = _preload(history, executor, [("get_customer_overview", {"account_no": account, "reason": reason})])[0]
+    if overview.get("status") == "ok":
+        _preload(history, executor, [("calculate_compensation", args) for args in overview["compensation_checks"]])
 
 
 # --- operator assist ----------------------------------------------------------------------------------------------
@@ -100,14 +138,7 @@ def assist_facts(handover: dict, overview: dict | None) -> list[tuple[str, dict]
     account = handover["account_no"]
     if not account or not overview or overview.get("status") != "ok":
         return []
-    calls = [("calculate_compensation", {"account_no": account, "event": "technician_no_show"})
-             for _ in overview["missed_visits"][:1]]
-    calls += [("calculate_compensation", {"account_no": account, "event": "outage", "outage_id": o["outage_id"]})
-              for o in overview["outages_last_60_days"]]
-    categories = [c["category"] for c in overview["last_cases"]]
-    calls += [("calculate_compensation", {"account_no": account, "event": "repeat_fault", "category": category})
-              for category in dict.fromkeys(categories) if categories.count(category) >= REPEAT_CASES]
-    return calls
+    return [("calculate_compensation", args) for args in compensation_checks(account, overview)]
 
 
 def parse_card(reply: str) -> dict:
@@ -126,19 +157,8 @@ def run_assist(staff, handover_id: str, model: str) -> dict:
     request = ASSIST_REQUEST.format(handover_id=handover_id, language=language)
     history = list(staff.history) + [{"role": "user", "content": request}]
 
-    def preload(calls: list[tuple[str, dict]]):
-        if not calls:
-            return []
-        ids = [f"pre-{len(executor.calls) + i + 1}" for i in range(len(calls))]
-        history.append({"role": "assistant", "content": "", "tool_calls": [
-            {"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
-            for call_id, (name, args) in zip(ids, calls, strict=True)]})
-        results = []
-        for call_id, (name, args) in zip(ids, calls, strict=True):
-            content = executor(name, json.dumps(args))
-            history.append({"role": "tool", "tool_call_id": call_id, "content": content})
-            results.append(json.loads(content))
-        return results
+    def preload(calls):
+        return _preload(history, executor, calls)
 
     first = [("get_handover", {"handover_id": handover_id})]
     if handover["account_no"]:

@@ -4,7 +4,14 @@ import json
 import pytest
 
 from linecare import db, handover_queue
-from linecare.agents.helpdesk import assist_facts, parse_card, run_assist, run_helpdesk_turn, tools_for
+from linecare.agents.helpdesk import (
+    assist_facts,
+    credit_question_account,
+    parse_card,
+    run_assist,
+    run_helpdesk_turn,
+    tools_for,
+)
 from linecare.crm import get_crm, set_crm
 from linecare.crm.base import CRMUnavailable
 from linecare.registry import execute_tool_call
@@ -81,6 +88,20 @@ def test_the_overview_has_history_but_no_contact_data_and_is_audited(staff):
     text = json.dumps(result)
     assert not any(secret in text for secret in ("5903", "1988-02-11", "@example.com", "+359", "Demo Street"))
     assert db.audit_entries("QN-100009")[-1]["reason"] == "handover HO-0001, drops"
+
+
+def test_the_overview_lists_every_credit_to_check_for_operators_only(staff):
+    # Eval hd-credits-all: asked directly, the model checked two of the three events. The list comes from the records.
+    result = call(staff(), "get_customer_overview", account_no="QN-100009", reason="angry customer, credits")
+    assert result["compensation_checks"] == [
+        {"account_no": "QN-100009", "event": "technician_no_show"},
+        {"account_no": "QN-100009", "event": "outage", "outage_id": "OUT-1987"},
+        {"account_no": "QN-100009", "event": "repeat_fault", "category": "intermittent"}]
+    assert "each entry in compensation_checks" in result["message"]
+    for args in result["compensation_checks"]:
+        assert call(staff(), "calculate_compensation", **args)["status"] == "ok"
+    technician = call(staff(TECHNICIAN), "get_customer_overview", account_no="QN-100009", reason="line check, drops")
+    assert "compensation_checks" not in technician and "message" not in technician
 
 
 def test_the_overview_survives_a_crm_outage(staff, monkeypatch):
@@ -249,6 +270,23 @@ def test_assist_facts_only_for_events_on_record():
 def test_an_unlabelled_reply_gives_an_incomplete_card():
     assert parse_card("Just text") == {}
     assert parse_card("**Summary:** a\nNEXT STEP: b") == {"summary": "a", "next_step": "b"}
+
+
+def test_a_credit_question_from_an_operator_loads_every_credit_first(staff, fake_lm):
+    # Eval hd-no-bigger-promise: asked "can I promise 25 EUR", Gemma offered to check instead of checking.
+    assert credit_question_account("Can I promise qn 100009 25 EUR?") == "QN-100009"
+    assert credit_question_account("Какви компенсации се полагат на QN-100009?") == "QN-100009"
+    assert credit_question_account("What is the router of QN-100009?") is None
+    assert credit_question_account("How do credits work?") is None
+    fake_lm.script(reply="10.00, 1.86 and 15.00 (needs approval).")
+    result = run_helpdesk_turn(staff(), "Can I promise QN-100009 25 EUR today?", "gemma-4-26b-a4b-it")
+    assert [c["name"] for c in result.tool_calls] == ["get_customer_overview"] + ["calculate_compensation"] * 3
+    assert all(c["status"] == "ok" for c in result.tool_calls)
+    assert [m["role"] for m in fake_lm.requests[0]["messages"]].count("tool") == 4
+    assert db.audit_entries("QN-100009")[0]["reason"].startswith("operator asked about credits: Can I promise")
+    fake_lm.script(reply="Ask an operator.")
+    technician = run_helpdesk_turn(staff(TECHNICIAN), "How much credit should QN-100009 get?", "gemma-4-26b-a4b-it")
+    assert technician.tool_calls == []
 
 
 def test_a_helpdesk_turn_keeps_history_and_logs(staff, fake_lm):
