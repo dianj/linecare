@@ -106,7 +106,7 @@ The steered miss on Qwen does not remove the handover: the gate only adds one, s
 decides, as before the gate.
 
 **In whole conversations** (`evals/run_evals.py`, both gates on): the handover group (6 cases, including a new
-Bulgarian request in the middle of a diagnosis) **24/24** on both models (2 runs each); all 42 cases once on Gemma
+Bulgarian request in the middle of a diagnosis) **12/12** on each model (6 cases × 2 runs); all 42 cases once on Gemma
 41/42. The one failure was a bug of the gate, found by the eval: a repeat caller who answered "Yes, please." to the
 offer of a colleague was handed over by the gate, which the agent had not done, but with reason `customer_request`,
 so the priority was normal instead of high. The gate now uses `repeat_contact` for repeat callers (test first);
