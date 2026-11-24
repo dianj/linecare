@@ -1,0 +1,20 @@
+{
+  "question_id": "linecare.wants_human",
+  "model": "qwen3.8-27b",
+  "prompt_hash": "821ecb04d3ca",
+  "temperature": 1.0,
+  "n_cases": 32,
+  "fitted_at": "2026-11-24T13:06:45.949334+00:00",
+  "metrics_before": {
+    "n": 32,
+    "accuracy": 0.9375,
+    "ece": 0.0746,
+    "brier": 0.1106
+  },
+  "metrics_after": {
+    "n": 32,
+    "accuracy": 0.9375,
+    "ece": 0.0707,
+    "brier": 0.1142
+  }
+}

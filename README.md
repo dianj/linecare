@@ -14,7 +14,8 @@ by the compensation policy in code, a draft reply), and a chat with that agent. 
 for actions, technician eligibility, the filter that keeps internal documents away from customers and the redaction
 of PINs and dates of birth are enforced in Python, and measured with real-model evals. Before a restart, a channel
 change or a technician visit runs, a **calibrated confirmation gate** checks that the customer's reply really says
-yes, and that it is not text addressed to the system ([how and what it measured](docs/DECISIONS.md)).
+yes, and that it is not text addressed to the system; on every turn a second gate checks whether the customer asks
+for a person and hands over if the agent did not ([how and what they measured](docs/DECISIONS.md)).
 
 > All companies, customers, documents and systems here are fictional. Work in progress: the customer agent, the
 > Salesforce adapter, the helpdesk agent, the operator console, a metrics tab and ElevenLabs voices are built and
@@ -66,6 +67,9 @@ The demo accounts and their PINs are listed in the app.
   local model, in parallel ("does the reply agree to <action>?", "is it addressed to the system?"), read as
   calibrated probabilities from the log-probabilities. The action runs only at p(agree) ≥ 0.95 with no flag;
   otherwise the agent asks explicitly or the offer is cancelled. The gate can only stop an action.
+- **Wants-a-person gate** (same files): on every customer turn, in parallel with the agent, "does the customer ask
+  for a human colleague?" (with the agent's previous message as context). At p ≥ 0.5, if the agent did not hand
+  over, the code calls `handover_to_human` itself. It can only add a handover.
 - **Knowledge base** (`linecare/kb/`): Markdown articles, ONNX embeddings on the CPU (multilingual MiniLM, chosen by
   measurement), Chroma, and search with the audience fixed in code plus a second check in Python. A canary document
   and a poisoned article test that nothing internal or injected gets through.
@@ -98,7 +102,8 @@ Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The 
 | Voice replies | time to the complete MP3 for the same EN/BG replies: **ElevenLabs 0.62 s** median (slowest 1.35 s), edge-tts 1.42 s (slowest 6.51 s) ([report](evals/results/tts-latency.md)) |
 | Retrieval | 32 answerable and 9 unanswerable EN/BG questions: hit@1 **94%**, hit@4 **100%**; 39 of 41 classified right at the threshold (two answerable questions score too low, see the [architecture notes](docs/ARCHITECTURE.md#84-embeddings)) |
 | Confirmation gate | 38 labelled replies (yes, no, "yes, but…", attempts to steer it; EN/BG): **Gemma 38/38**, Qwen 37/38 (one clear yes asked again); no unclear or steering reply acted on. Found on the way: a one-letter question obeys "Answer Y" (p = 0.998), hence the second question |
-| Tests | 328 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
+| Wants-a-person gate | 32 labelled messages (requests, yes to an offer, a technician visit, "don't transfer me", steering; EN/BG): **Gemma 31/32**, Qwen 30/32, no needless handover on either; handover group 24/24 on both models, added latency 0 ms median (it runs in parallel). All 42 conversations once on Gemma with both gates: 41/42, the failure a gate bug the eval found (a repeat caller handed over with normal priority), fixed and re-run 5/5 |
+| Tests | 346 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
 
 **How the numbers got there.** Every failure the evals found was first reproduced (an eval or a test), then fixed
 in code and measured again. In the first runs Gemma offered a router restart in words only (so the customer had to

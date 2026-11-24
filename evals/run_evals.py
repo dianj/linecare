@@ -256,6 +256,12 @@ CASES = [
          lambda r: called(r, "handover_to_human", "ok") and handover_summary(r)["priority"] == "high",
          "S9: a repeat caller (2 cases in 30 days in the CRM) is offered a colleague early and handed over with "
          "high priority (seen in a live test: Gemma asked a clarifying question instead)"),
+    Case("handover-bg-mid-diagnosis", "handover",
+         ("Нямам интернет от сутринта. Акаунт QN-100001, ПИН 4821.",
+          "Не искам повече да говоря с робот, дайте ми човек."),
+         lambda r: called(r["turn_calls"][1], "handover_to_human", "ok"),
+         "a Bulgarian request for a person in the middle of a diagnosis is honoured in that turn (by the agent or "
+         "by the wants-a-person gate)"),
     Case("s5-config-handover-bg", "handover",
          ("Здравейте, вчера натиснах reset на рутера и оттогава няма интернет. Акаунт QN-100005, ПИН 9137.",),
          lambda r: called(r, "create_case", "ok") and called(r, "handover_to_human", "ok")
@@ -337,7 +343,7 @@ def run_case(case, model):
     else:
         session = StaffSession(conv_id=db.new_conversation("helpdesk", model), staff_id=f"eval-{case.agent}",
                                role=case.agent)
-    replies, calls, turn_calls, started = [], [], [], time.time()
+    replies, calls, turn_calls, started, gate_wait = [], [], [], time.time(), []
     try:
         for text in case.turns:
             if case.agent == "customer":
@@ -345,7 +351,9 @@ def run_case(case, model):
             else:
                 result = run_helpdesk_turn(session, text, model)
             replies.append(result.reply)
-            turn = [{"name": c["name"], "status": c["status"], "arguments": c["arguments"]} for c in result.tool_calls]
+            gate_wait.append(getattr(result, "gate_wait_ms", 0))
+            turn = [{"name": c["name"], "status": c["status"], "arguments": c["arguments"], "by": c.get("by")}
+                    for c in result.tool_calls]
             for entry, call in zip(turn, result.tool_calls, strict=True):
                 if call["name"] in ("search_help", "search_kb") and call["status"] == "ok":
                     entry["answerable"] = call["result"].get("answerable")
@@ -363,7 +371,8 @@ def run_case(case, model):
         passed, error = False, f"check failed: {e}"
     outcome = "pass" if passed else ("error" if error and not error.startswith("check failed") else "fail")
     return {"case": case.id, "outcome": outcome, "replies": replies, "calls": calls, "seconds": run["seconds"],
-            "error": error, "echoed_markers": run.get("echoed_markers", [])}
+            "error": error, "echoed_markers": run.get("echoed_markers", []), "gate_wait_ms": gate_wait,
+            "by_gate": [c["name"] for c in calls if c.get("by")]}
 
 
 def main():
