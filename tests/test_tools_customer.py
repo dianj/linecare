@@ -104,6 +104,18 @@ def test_wifi_channel_change_needs_a_confirmation_and_clears_the_interference(ve
     assert session.fixes == [{"tool": "change_wifi_channel", "turn": 2}]
 
 
+def test_a_confirmation_given_to_the_wrong_tool_names_the_right_one(verified):
+    # Eval s4-channel-after-yes (Gemma, 1 of 2): after "yes, change the channel" the model passed the channel offer's
+    # id to reboot_router. It was refused, but as "unknown or expired", so the model made a new offer.
+    session = verified("QN-100004")
+    offer = change_wifi_channel(session, band="2.4")
+    session.begin_turn()
+    wrong = reboot_router(session, confirmation_id=offer["confirmation_id"])
+    assert wrong["status"] == "blocked" and wrong["reason"] == "confirmation_for_other_tool"
+    assert "change_wifi_channel" in wrong["message"] and session.reboots == 0
+    assert change_wifi_channel(session, band="2.4", confirmation_id=offer["confirmation_id"])["status"] == "ok"
+
+
 def test_wifi_channel_change_checks_band_and_channel(verified):
     session = verified("QN-100004")
     assert change_wifi_channel(session, band="6")["status"] == "error"

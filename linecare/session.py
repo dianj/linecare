@@ -125,8 +125,10 @@ class Session:
     def take_pending(self, tool: str, confirmation_id: str) -> tuple[PendingAction | None, str | None]:
         """Return (action, None) if it may run now, else (None, reason). A taken action cannot run twice."""
         action = self.pending.get(str(confirmation_id).strip().upper())
-        if action is None or action.tool != tool:
+        if action is None:
             return None, "unknown_or_expired_confirmation"
+        if action.tool != tool:                      # the offer stays open for its own tool
+            return None, "confirmation_for_other_tool"
         if action.created_turn >= self.turn:
             return None, "confirm_in_next_turn"
         del self.pending[action.confirmation_id]

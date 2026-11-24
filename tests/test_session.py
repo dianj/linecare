@@ -88,7 +88,7 @@ def test_a_confirmation_is_tied_to_its_tool_and_expires(new_session):
     session.begin_turn()
     action = session.create_pending("reboot_router", {}, "Restart the router")
     session.begin_turn()
-    assert session.take_pending("book_technician", action.confirmation_id)[1] == "unknown_or_expired_confirmation"
+    assert session.take_pending("book_technician", action.confirmation_id)[1] == "confirmation_for_other_tool"
     for _ in range(config.CONFIRMATION_TTL_TURNS):
         session.begin_turn()
     assert session.take_pending("reboot_router", action.confirmation_id)[1] == "unknown_or_expired_confirmation"

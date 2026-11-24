@@ -42,6 +42,10 @@ def two_step(session, tool: str, arguments: dict, summary: str, confirmation_id,
     if action is None:
         if reason == "confirm_in_next_turn":
             return blocked(reason, "The customer has not answered yet. Ask them first and wait for their reply.")
+        if reason == "confirmation_for_other_tool":
+            other = session.pending[str(confirmation_id).strip().upper()].tool
+            return blocked(reason, f"Nothing was done: this confirmation_id is for {other}, not {tool}. If the "
+                                   f"customer agreed to that offer, call {other} with this confirmation_id.")
         return blocked(reason, "This confirmation is unknown or has expired. Call the tool without "
                                "confirmation_id to make a new offer, and ask the customer.")
     refusal = confirmation_gate(session, action)
