@@ -218,3 +218,23 @@ def test_a_technician_uses_the_helpdesk_tab_but_not_the_queue(page, app_url, fak
     expect(reply.locator(".source").first).to_contain_text("INT-06")
     page.click("nav >> text=Operator console")
     expect(page.locator("#queue")).to_contain_text("needs the operator role")
+
+
+def test_metrics_tiles_chart_and_a_transcript_shown_as_text(page, app_url, fake_lm):
+    payload = '<img src=x onerror="window.__xss=1">'
+    fake_lm.script_rounds([("verify_customer", {"account_no": MARIA.account_no, "pin": MARIA.pin})],
+                          reply=f"Hello {payload}")
+    page.goto(app_url)
+    send(page, f"{MARIA.account_no}, PIN {MARIA.pin}")
+    page.goto(f"{app_url}/#metrics")
+    expect(page.locator("#metricsBody")).to_contain_text("Sign in to see the metrics")
+    page.locator("#view-metrics [data-login] input").fill("demo-operator")
+    page.locator("#view-metrics [data-login] button").click()
+    expect(page.locator("#metricsBody .tile").first).to_contain_text("customer conversations")
+    expect(page.locator("#metricsBody svg.bars").first).to_be_visible()
+    row = page.locator("#metricsBody tr.pick").first
+    expect(row).to_contain_text("S3")
+    row.click()
+    expect(page.locator(".transcript .msg.bot")).to_contain_text(payload)
+    assert MARIA.pin not in page.locator(".transcript").inner_text()
+    assert page.evaluate("window.__xss") is None

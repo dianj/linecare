@@ -11,6 +11,7 @@ from linecare.language import detect_language
 from linecare.redaction import redact_arguments, redact_history, redact_text
 from linecare.registry import execute_tool_call
 from linecare.tool_schemas import CUSTOMER_TOOLS
+from mocks.scenarios import DEMO_BY_ACCOUNT
 
 CAP_REACHED_REPLY = ("Sorry, I could not finish that. Please tell me again what you need, or I can connect you "
                      "with a colleague.")
@@ -103,6 +104,8 @@ def run_customer_turn(session, text: str, model: str, *, channel: str = "chat", 
     db.log_turn(session.conv_id, "assistant", redact_text(reply, session.secrets), model, llm_ms=llm_ms,
                 tools_ms=tools_ms, rounds=rounds, tool_calls=calls)
     if session.verified and not was_verified:
-        db.update_conversation(session.conv_id, account_no=session.account_no, language=session.language)
+        demo = DEMO_BY_ACCOUNT.get(session.account_no)    # metrics: resolution by scenario (demo customers only)
+        db.update_conversation(session.conv_id, account_no=session.account_no, language=session.language,
+                               scenario_tag=demo.scenario if demo else None)
     return TurnResult(reply=reply, tool_calls=calls, rounds=rounds, llm_ms=llm_ms, tools_ms=tools_ms,
                       cap_reached=cap_reached)

@@ -96,6 +96,29 @@
     .staff-form { display: flex; gap: 8px; }
     .staff-form textarea { height: 46px; }
     .close-form { display: flex; gap: 8px; margin-top: 12px; }
+    /* metrics */
+    .metrics { display: grid; grid-template-columns: minmax(290px, 0.6fr) minmax(560px, 2fr); height: 100%; }
+    .metrics > section { overflow-y: auto; padding: 18px 20px; min-height: 0; }
+    .metrics > section + section { border-left: 1px solid var(--line); }
+    .metrics h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 24px 0 10px; }
+    .metrics > section > h2:first-child, #metricsBody > div:first-child > h2 { margin-top: 0; }
+    .filters { display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
+    .filters input, .filters select { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; color-scheme: dark; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
+    .tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tile .label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 0 32px; }
+    .metrics .login button { white-space: nowrap; }
+    svg.bars { max-width: 100%; height: auto; }
+    svg.bars text { fill: var(--text); font: 12px "Segoe UI", system-ui, sans-serif; }
+    svg.bars text.dim { fill: var(--muted); }
+    svg.bars .p50 { fill: var(--accent); }
+    svg.bars .p95 { fill: var(--accent); opacity: .35; }
+    svg.bars .bar { fill: var(--accent); }
+    tr.pick { cursor: pointer; }
+    tr.pick:hover td, tr.pick.selected td { background: var(--panel-2); }
+    .transcript { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -103,6 +126,7 @@
     <a href="#customer" data-view="customer">Customer</a>
     <a href="#operator" data-view="operator">Operator console</a>
     <a href="#helpdesk" data-view="helpdesk">Helpdesk</a>
+    <a href="#metrics" data-view="metrics">Metrics</a>
 </nav>
 <div class="view app" id="view-customer">
     <section class="chat">
@@ -193,6 +217,28 @@
             <textarea aria-label="Message to the helpdesk agent" placeholder="e.g. How do I fix PPPoE after a factory reset?"></textarea>
             <button class="primary" type="submit">Send</button>
         </form>
+    </section>
+</div>
+<div class="view metrics" id="view-metrics" hidden>
+    <section>
+        <h2>Staff sign-in</h2>
+        <form class="login" data-login>
+            <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
+            <button class="ghost" type="submit">Sign in</button>
+        </form>
+        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <h2>Filter</h2>
+        <form class="filters" id="metricsFilter">
+            <label>From <input type="date" name="from"></label>
+            <label>To <input type="date" name="to"></label>
+            <label>Model <select name="model" aria-label="Model"><option value="">All models</option></select></label>
+            <button class="ghost" type="submit">Apply</button>
+        </form>
+        <p class="note">Customer conversations with at least one message. Outcomes are set by code from tool results
+            (a case, a booked visit, a handover, a fix the customer confirmed, an answer from an article).</p>
+    </section>
+    <section>
+        <div id="metricsBody"><p class="muted">Sign in to see the metrics.</p></div>
     </section>
 </div>
 <script>
@@ -437,12 +483,13 @@ document.getElementById('newChat').addEventListener('click', async () => {
 // --- Tabs (address hash) ---
 function showView() {
     const name = (location.hash || '#customer').slice(1);
-    const view = ['customer', 'operator', 'helpdesk'].includes(name) ? name : 'customer';
+    const view = ['customer', 'operator', 'helpdesk', 'metrics'].includes(name) ? name : 'customer';
     for (const node of document.querySelectorAll('.view')) node.hidden = node.id !== `view-${view}`;
     for (const link of document.querySelectorAll('nav.tabs a')) {
         if (link.dataset.view === view) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
     }
     if (view === 'operator') loadQueue();
+    if (view === 'metrics') loadMetrics();
 }
 window.addEventListener('hashchange', showView);
 
@@ -474,6 +521,7 @@ for (const form of document.querySelectorAll('[data-login]')) {
         renderWhoami();
         if (!result.ok) form.nextElementSibling.textContent = result.data.message || 'Sign-in failed.';
         loadQueue();
+        loadMetrics();
     });
 }
 
@@ -664,12 +712,188 @@ document.getElementById('closeForm').addEventListener('submit', async (event) =>
     loadQueue();
 });
 
+// --- Metrics (ARCHITECTURE.md §12.3): numbers from /api/metrics, drawn as plain SVG ---
+const SVG = 'http://www.w3.org/2000/svg';
+const STAGES = [['end_to_end', 'End to end'], ['llm', 'LLM (all rounds)'], ['tools', 'Tools'], ['stt', 'Speech to text']];
+
+function svgNode(tag, attrs, text) {
+    const node = document.createElementNS(SVG, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function pct(value) { return value === null || value === undefined ? '–' : `${Math.round(value * 100)}%`; }
+function secs(ms) { return ms === null || ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`; }
+
+function tile(value, label) {
+    const node = el('div', 'tile');
+    node.appendChild(el('div', 'value', value));
+    node.appendChild(el('div', 'label', label));
+    return node;
+}
+
+// Horizontal bars, one row per item: [label, value, valueText, secondValue?] (second = p95, drawn behind).
+function bars(rows, max, ariaLabel) {
+    const rowH = 26, labelW = 130, width = 460, barW = width - labelW - 90;
+    const svg = svgNode('svg', {class: 'bars', viewBox: `0 0 ${width} ${rows.length * rowH}`, width,
+                                role: 'img', 'aria-label': ariaLabel});
+    rows.forEach(([label, value, text, second], i) => {
+        const y = i * rowH;
+        svg.appendChild(svgNode('text', {x: 0, y: y + 17, class: 'dim'}, label));
+        if (second !== undefined && max) {
+            svg.appendChild(svgNode('rect', {x: labelW, y: y + 5, width: Math.max(second / max * barW, 1), height: 14, rx: 3, class: 'p95'}));
+        }
+        if (max) {
+            svg.appendChild(svgNode('rect', {x: labelW, y: y + 5, width: Math.max(value / max * barW, 1), height: 14, rx: 3,
+                                             class: second !== undefined ? 'p50' : 'bar'}));
+        }
+        svg.appendChild(svgNode('text', {x: labelW + barW + 8, y: y + 17}, text));
+    });
+    return svg;
+}
+
+function countTable(counts, heading) {
+    const entries = Object.entries(counts || {});
+    if (!entries.length) return el('p', 'muted', 'None in this period.');
+    const table = el('table');
+    const head = el('tr');
+    head.append(el('th', '', heading), el('th', '', 'Count'));
+    table.appendChild(head);
+    for (const [key, n] of entries) {
+        const row = el('tr');
+        row.append(el('td', 'mono', key), el('td', '', String(n)));
+        table.appendChild(row);
+    }
+    return table;
+}
+
+function section(title, ...children) {
+    const box = el('div');
+    box.appendChild(el('h2', '', title));
+    for (const child of children) box.appendChild(child);
+    return box;
+}
+
+async function showTranscript(convId, row, box) {
+    for (const other of row.parentNode.querySelectorAll('tr.selected')) other.classList.remove('selected');
+    row.classList.add('selected');
+    const result = await api(`/api/conversations/${encodeURIComponent(convId)}`);
+    box.replaceChildren(el('h2', '', `Transcript ${convId} (stored redacted)`));
+    if (!result.ok) { box.appendChild(el('p', 'muted', result.data.message || 'Not available.')); return; }
+    const calls = {};
+    for (const call of result.data.tool_calls) (calls[call.turn_id] = calls[call.turn_id] || []).push(call);
+    for (const turn of result.data.turns) {
+        const bubble = el('div', `msg ${turn.role === 'user' ? 'user' : 'bot'}`, turn.text_redacted);
+        const turnCalls = calls[turn.turn_id] || [];
+        if (turnCalls.length) {
+            const tools = el('div', 'tools');
+            for (const call of turnCalls) {
+                const status = /^[a-z_]+$/.test(call.status) ? call.status : 'unknown';
+                const chip = el('span', `tool ${status}`, call.tool);
+                chip.title = call.result_summary || status;
+                tools.appendChild(chip);
+            }
+            bubble.appendChild(tools);
+        }
+        box.appendChild(bubble);
+    }
+}
+
+function recentTable(recent, transcriptBox) {
+    if (!recent.length) return el('p', 'muted', 'No conversations in this period.');
+    const table = el('table');
+    const head = el('tr');
+    for (const name of ['Started', 'Scenario', 'Outcome', 'Messages', 'Model', 'Channel']) head.appendChild(el('th', '', name));
+    table.appendChild(head);
+    for (const c of recent) {
+        const row = el('tr', 'pick');
+        row.tabIndex = 0;
+        row.title = 'Show the transcript';
+        for (const value of [c.started_at.slice(0, 16).replace('T', ' '), c.scenario_tag || '–', c.outcome || '–',
+                             String(c.user_turns), (c.model || '').split('-').slice(0, 2).join(' '), c.channel]) {
+            row.appendChild(el('td', '', value));
+        }
+        const open = () => showTranscript(c.conv_id, row, transcriptBox);
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', (event) => { if (event.key === 'Enter') open(); });
+        table.appendChild(row);
+    }
+    return table;
+}
+
+async function loadMetrics() {
+    const body = document.getElementById('metricsBody');
+    if (!staff) { body.replaceChildren(el('p', 'muted', 'Sign in to see the metrics.')); return; }
+    const form = document.getElementById('metricsFilter');
+    const params = new URLSearchParams();
+    for (const name of ['from', 'to', 'model']) if (form.elements[name].value) params.set(name, form.elements[name].value);
+    const result = await api(`/api/metrics?${params}`);
+    if (!result.ok) { body.replaceChildren(el('p', 'muted', result.data.message || 'Metrics are not available.')); return; }
+    const m = result.data;
+
+    const select = form.elements.model;
+    const chosen = select.value;
+    const all = el('option', '', 'All models');
+    all.value = '';
+    select.replaceChildren(all);
+    for (const model of m.models) { const option = el('option', '', model); option.value = model; select.appendChild(option); }
+    select.value = chosen;
+
+    const tiles = el('div', 'tiles');
+    tiles.append(tile(String(m.conversations), 'customer conversations'),
+                 tile(pct(m.containment_rate), 'contained (resolved or answered)'),
+                 tile(pct(m.escalation_rate), 'handed over to a person'),
+                 tile(m.avg_turns_to_resolution === null ? '–' : String(m.avg_turns_to_resolution), 'messages to a confirmed fix'),
+                 tile(String(m.fixed_remotely), 'fixed remotely, no visit'),
+                 tile(pct(m.tool_error_rate), `tool errors (of ${m.tool_calls} calls)`));
+
+    const latency = STAGES.filter(([key]) => m.latency_ms[key]).map(([key, label]) => {
+        const stage = m.latency_ms[key];
+        return [label, stage.p50, `${secs(stage.p50)} / ${secs(stage.p95)}`, stage.p95];
+    });
+    const latencyMax = Math.max(0, ...latency.map((row) => row[3]));
+    const outcomes = Object.entries(m.outcomes);
+    const outcomeMax = Math.max(0, ...outcomes.map(([, n]) => n));
+
+    const scenarios = el('table');
+    const scenarioHead = el('tr');
+    scenarioHead.append(el('th', '', 'Scenario'), el('th', '', 'Conversations'), el('th', '', 'Outcomes'));
+    scenarios.appendChild(scenarioHead);
+    for (const [tag, counts] of Object.entries(m.by_scenario)) {
+        const row = el('tr');
+        const total = Object.values(counts).reduce((a, b) => a + b, 0);
+        row.append(el('td', 'mono', tag), el('td', '', String(total)),
+                   el('td', '', Object.entries(counts).map(([o, n]) => `${o} ${n}`).join(', ')));
+        scenarios.appendChild(row);
+    }
+
+    const transcript = el('div', 'transcript');
+    const grid = el('div', 'grid2');
+    grid.append(
+        section('Latency per reply (median / p95)',
+                latency.length ? bars(latency, latencyMax, 'Latency per stage, median and 95th percentile')
+                               : el('p', 'muted', 'No replies in this period.')),
+        section('Outcomes',
+                outcomes.length ? bars(outcomes.map(([o, n]) => [o, n, String(n)]), outcomeMax, 'Conversations per outcome')
+                                : el('p', 'muted', 'No conversations in this period.')),
+        section('Handovers by reason', countTable(m.escalation_reasons, 'Reason')),
+        section('Blocked actions (guardrails)', countTable(m.blocked_actions, 'Reason')));
+    body.replaceChildren(
+        section('Overview', tiles), grid,
+        section('By scenario (demo customers)', Object.keys(m.by_scenario).length ? scenarios : el('p', 'muted', 'None.')),
+        section('Last 20 conversations', recentTable(m.recent, transcript)), transcript);
+}
+
+document.getElementById('metricsFilter').addEventListener('submit', (event) => { event.preventDefault(); loadMetrics(); });
+
 (async () => {
     showView();
     const me = await api('/api/staff/me');
     staff = me.ok ? me.data : null;
     renderWhoami();
     if (location.hash === '#operator') loadQueue();
+    if (location.hash === '#metrics') loadMetrics();
     addMessage('bot', 'Hello! I am LineCare, Quillnet\'s support assistant. How can I help?');
     const data = await (await fetch('/api/customer/state')).json();
     renderState(data.state);

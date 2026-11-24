@@ -14,13 +14,13 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel, Field
 
-from linecare import config, db, handover_queue
+from linecare import config, db, handover_queue, metrics
 from linecare.agents.customer import run_customer_turn
 from linecare.agents.helpdesk import run_assist, run_helpdesk_turn
 from linecare.agents.loop import llm_client
@@ -467,6 +467,18 @@ def helpdesk_reset(request: Request):
         return staff_reply({"error_code": "busy", "message": "Wait for the current reply first."}, 409)
     staff_sessions[cookie] = _new_staff(entry["staff"].role, cookie)
     return {"status": "ok"}
+
+
+DATE = r"^\d{4}-\d{2}-\d{2}$"
+
+
+@app.get("/api/metrics")
+def kpis(request: Request, date_from: str | None = Query(None, alias="from", pattern=DATE),
+         date_to: str | None = Query(None, alias="to", pattern=DATE),
+         model: str | None = Query(None, max_length=80)):
+    """KPIs of the customer conversations (ARCHITECTURE.md §12.3), for staff. Aggregates and redacted ids only."""
+    staff_entry(request)
+    return metrics.compute(date_from, date_to, model or None)
 
 
 @app.get("/api/conversations/{conv_id}")
