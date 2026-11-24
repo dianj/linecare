@@ -91,7 +91,8 @@ The demo accounts and their PINs are listed in the app.
   at `/mock` (OpenAPI at `/docs`).
 
 Details and the decision log: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The problem, KPIs and risks on one page:
-[docs/SOLUTION_BRIEF.md](docs/SOLUTION_BRIEF.md); a 3-minute live demo: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+[docs/SOLUTION_BRIEF.md](docs/SOLUTION_BRIEF.md); a 3-minute live demo: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). How the parts map to Cognigy.AI and
+Google CX Agent Studio: [docs/PLATFORM_COMPARISON.md](docs/PLATFORM_COMPARISON.md).
 
 ## Results
 
