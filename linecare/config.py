@@ -69,7 +69,7 @@ WHISPER_PROMPTS = {
     "bg": "Поддръжка на Quillnet: номер на акаунт QN-100042, рутер, QN-Box 4, QN-Mesh Duo, Wi-Fi, авария, техник, "
           "сметка, интернет.",
 }
-TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge")  # edge | fake (elevenlabs in D4)
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edge")  # edge | elevenlabs | fake
 # edge-tts uses Microsoft's online neural voices, so reply text leaves the machine.
 TTS_VOICES = {
     "female": {"en": "en-US-AvaNeural", "bg": "bg-BG-KalinaNeural"},
@@ -79,6 +79,14 @@ DEFAULT_VOICE_GENDER = "female"
 MAX_TTS_CHARS = 1200
 TTS_ATTEMPTS = 3
 TTS_ATTEMPT_TIMEOUT = 15
+# ElevenLabs (TTS_PROVIDER=elevenlabs): reply text goes to their API. A key restricted to Text to Speech is enough.
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_URL = os.environ.get("ELEVENLABS_URL", "https://api.elevenlabs.io")
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5")   # low latency, Bulgarian included
+ELEVENLABS_VOICES = {   # premade voices (no voice library needed); override with ELEVENLABS_VOICE_FEMALE / _MALE
+    "female": os.environ.get("ELEVENLABS_VOICE_FEMALE", "EXAVITQu4vr4xnSDxMaL"),
+    "male": os.environ.get("ELEVENLABS_VOICE_MALE", "nPczCjzI2devNBz1zQrb"),
+}
 
 # --- Clock ---
 # An ISO datetime freezes "now" for tests, evals and a repeatable demo. Empty = the real clock.
