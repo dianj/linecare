@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1494 1430" width="1494" height="1430" role="img" aria-label="Sequence diagram of one LineCare customer turn">
-<title>One customer turn: text or voice in, tool loop behind the session gate, the rules in code and a calibrated confirmation gate, access-controlled knowledge base, reply with sources and optional voice out</title>
+<title>One customer turn: text or voice in, tool loop behind the session gate, the rules in code, a calibrated confirmation gate and a wants-a-person gate, access-controlled knowledge base, reply with sources and optional voice out</title>
 <style>
   svg { background: #0f1419; }
   text { font-family: "Segoe UI", Roboto, Arial, sans-serif; fill: #e9eef3; }
@@ -139,4 +139,7 @@
 <text x="201.0" y="1267.5" class="edge-label" text-anchor="middle">audio</text>
 <rect x="304.0" y="1322" width="567.4" height="24" rx="4" class="note"/>
 <text x="314.0" y="1337" class="edge-label note-text">every turn is logged redacted: text, tool calls with arguments, timings (STT, LLM, tools)</text>
+<rect x="700" y="980" width="760" height="38" rx="4" class="note"/>
+<text x="710" y="995" class="edge-label note-text">every turn, in parallel with the loop: wants-a-person gate (one letter, p ≥ 0.5, sees the agent's last message)</text>
+<text x="710" y="1009" class="edge-label note-text">asked for a person and the agent did not hand over → the code calls handover_to_human</text>
 </svg>
