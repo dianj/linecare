@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel, Field
 
-from linecare import config, db, handover_queue, metrics
+from linecare import config, db, handover_queue, metrics, ratelimit
 from linecare.agents.customer import run_customer_turn
 from linecare.agents.helpdesk import run_assist, run_helpdesk_turn
 from linecare.agents.loop import llm_client
@@ -105,7 +105,26 @@ def remember_reply(entry: dict, text: str, language: str) -> str:
     return turn_id
 
 
+limiters = {"chat": ratelimit.RateLimiter(config.CHAT_PER_MINUTE),
+            "login": ratelimit.RateLimiter(config.LOGIN_PER_MINUTE)}
+
+
+def rate_limited(request: Request, kind: str) -> JSONResponse | None:
+    """429 when this client address has used up its requests of this kind for now; None otherwise."""
+    limiter = limiters[kind]
+    if limiter.allow(request.client.host if request.client else "unknown"):
+        return None
+    return JSONResponse({"error_code": "rate_limited", "message": "Too many requests. Please wait a moment."},
+                        status_code=429, headers={"Retry-After": str(limiter.retry_after())})
+
+
+def blank_state() -> dict:
+    """What a browser without a session sees; nothing is created for it (polling cannot push sessions out)."""
+    return public_state(Session(conv_id=""))
+
+
 def get_session(request: Request) -> tuple[str, dict]:
+    """This browser's session; a new one only for a real turn (chat or voice), which is rate limited."""
     cookie = request.cookies.get(SESSION_COOKIE)
     if cookie in sessions:
         sessions.move_to_end(cookie)
@@ -198,12 +217,14 @@ async def run_turn(request: Request, text: str, *, channel: str = "chat", stt_ms
 
 @app.post("/api/customer/chat")
 async def customer_chat(body: ChatRequest, request: Request):
-    return await run_turn(request, body.text.strip())
+    return rate_limited(request, "chat") or await run_turn(request, body.text.strip())
 
 
 @app.post("/api/customer/voice")
 async def customer_voice(request: Request, audio: UploadFile = File(...), language: str = Form("auto")):
     """A recorded message: Whisper on the CPU, spoken account numbers normalised, then the normal turn."""
+    if refused := rate_limited(request, "chat"):
+        return refused
     raw = await audio.read()
     if len(raw) > config.MAX_AUDIO_BYTES:
         return JSONResponse({"error_code": "too_long", "message": "The recording is too long."}, status_code=413)
@@ -246,6 +267,8 @@ async def text_to_speech(turn_id: str, request: Request, gender: str = Form(conf
     """Speak one of this session's own replies, by its turn id. Never free text: with a paid voice provider an open
     endpoint would let anyone spend its credits. Each reply is synthesised once per voice and then served from the
     session's cache."""
+    if refused := rate_limited(request, "chat"):
+        return refused
     entry = sessions.get(request.cookies.get(SESSION_COOKIE))
     turn = entry["replies"].get(turn_id) if entry else None
     if turn is None:
@@ -268,17 +291,21 @@ async def text_to_speech(turn_id: str, request: Request, gender: str = Form(conf
 @app.post("/api/customer/reset")
 def customer_reset(request: Request):
     cookie = request.cookies.get(SESSION_COOKIE)
-    if cookie in sessions and sessions[cookie]["lock"].locked():
+    if cookie not in sessions:            # nothing to reset; the first message makes the session
+        return JSONResponse({"status": "ok", "state": blank_state()})
+    if sessions[cookie]["lock"].locked():
         return respond({"error_code": "busy", "message": "Please wait for the previous reply."}, cookie, 409)
-    cookie = cookie or uuid.uuid4().hex
     sessions[cookie] = _new_entry()
     return respond({"status": "ok", "state": public_state(sessions[cookie]["session"])}, cookie)
 
 
 @app.get("/api/customer/state")
 def customer_state(request: Request):
-    cookie, entry = get_session(request)
-    return respond({"state": public_state(entry["session"])}, cookie)
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if cookie not in sessions:
+        return JSONResponse({"state": blank_state()})
+    sessions.move_to_end(cookie)
+    return respond({"state": public_state(sessions[cookie]["session"])}, cookie)
 
 
 @app.get("/api/demo-customers")
@@ -365,7 +392,9 @@ async def http_error(_request: Request, exc: HTTPException):
 
 
 @app.post("/api/staff/login")
-def staff_login(body: StaffLogin):
+def staff_login(body: StaffLogin, request: Request):
+    if refused := rate_limited(request, "login"):
+        return refused
     role = role_for_token(body.token)
     if role is None:
         return staff_reply({"error_code": "bad_token", "message": "Unknown staff token."}, 401)
@@ -467,6 +496,8 @@ def ui_staff_call(call: dict) -> dict:
 def helpdesk_chat(body: StaffChatRequest, request: Request):
     global active_turns
     entry = staff_entry(request)
+    if refused := rate_limited(request, "chat"):
+        return refused
     if model_state["switching"]:
         return staff_reply({"error_code": "switching", "message": "The model is switching; try again in a minute."},
                            409)

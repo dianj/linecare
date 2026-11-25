@@ -59,6 +59,8 @@ def clean_state(fake_lm, monkeypatch):
         lmstudio.model_state.update(active=config.MODEL_NAME, switching=False, target=None, error=None)
         sys.modules["server"].sessions.clear()
         sys.modules["server"].staff_sessions.clear()
+        for limiter in sys.modules["server"].limiters.values():   # each test starts with full request buckets
+            limiter.reset()
     yield
 
 
