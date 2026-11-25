@@ -8,4 +8,5 @@ python-multipart>=0.0.34,<1
 chromadb>=1.5.9,<2
 fastembed>=0.9.1,<1
 faster-whisper>=1.2.1,<2
+av<19  # faster-whisper 1.2.x passes metadata_errors, removed in PyAV 19
 edge-tts>=7.3.1,<8
