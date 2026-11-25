@@ -62,12 +62,12 @@ systems did (calls, confirmations, records), not on the wording. Details in the
 
 | | Result |
 |---|---|
-| Customer and helpdesk conversations | Gemma 4 26B **82/82** (2 runs), Qwen 3.8 27B 40/41 (the one failure was the grader, fixed and re-run 3/3) |
+| Customer and helpdesk conversations | Gemma 4 26B **84/84** (2 runs), Qwen 3.8 27B **42/42**; a held-out set of 15: Gemma 12/15, Qwen 15/15, 0 leaks |
 | Leaks of internal text, canary or discount codes | **0** |
 | "Yes" checks before an action (38 labelled replies, EN/BG) | Gemma 38/38, Qwen 37/38; no unclear or steering reply acted on |
 | Credits computed by the policy | every rule and boundary unit-tested; the helpdesk agent checks every event on record (30/30) |
 | Voice reply latency (time to the complete audio) | ElevenLabs 0.62 s median, edge-tts 1.42 s |
-| Automated tests | 328, 97 % line coverage, run in CI on every push |
+| Automated tests | 361, 97 % line coverage, run in CI on every push |
 
 Every failure the evals found was first reproduced, then fixed in code and measured again; the README lists them.
 

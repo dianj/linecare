@@ -302,10 +302,10 @@ pending_crm_sync, kb_sources, sentiment, suggested_next_step, transcript_turns`.
 |---|---|
 | `POST /api/customer/chat` | one typed turn |
 | `POST /api/customer/voice` | one recorded turn (multipart audio, language `auto`/`en`/`bg`) |
-| `POST /api/tts` | reply as MP3 |
+| `POST /api/tts/{turn_id}` | one of this session's own replies as MP3 (cached per voice; never free text) |
 | `POST /api/customer/reset`, `GET /api/customer/state` | new conversation, current state |
-| `GET /api/demo-customers` | the fictional demo accounts |
-| `GET /api/health`, `GET /api/models`, `POST /api/model` | LLM reachability, model list and switch |
+| `GET /api/demo-customers` | the fictional demo accounts with their PINs (only with `DEMO_MODE=1`) |
+| `GET /api/health`, `GET /api/models`, `POST /api/model` | LLM, embedder, KB index, CRM and voice provider; model list; switch (staff only) |
 | `POST /api/staff/login`, `GET /api/staff/me`, `POST /api/staff/logout` | staff sign-in with a demo token |
 | `GET /api/operator/handovers?status=` | the queue (operator) |
 | `POST /api/operator/handovers/{id}/claim` | claim; starts the assist job, returns at once (operator) |

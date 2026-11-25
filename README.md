@@ -17,9 +17,11 @@ change or a technician visit runs, a **calibrated confirmation gate** checks tha
 yes, and that it is not text addressed to the system; on every turn a second gate checks whether the customer asks
 for a person and hands over if the agent did not ([how and what they measured](docs/DECISIONS.md)).
 
-> All companies, customers, documents and systems here are fictional. Work in progress: the customer agent, the
-> Salesforce adapter, the helpdesk agent, the operator console, a metrics tab and ElevenLabs voices are built and
-> measured ([roadmap](docs/ARCHITECTURE.md#15-roadmap-and-limitations)).
+> All companies, customers, documents and systems here are fictional. **Status:** complete portfolio demo,
+> verified 2026-11-25: 361 tests, 97 % coverage, ruff clean; real-model
+> evals Gemma 4 26B 84/84 and Qwen 3.8 27B 42/42, 0 leaks; a held-out set of 15: Gemma 12/15, Qwen 15/15. See [Limitations](#limitations) and
+> [What production would need](#what-production-would-need); how it was built and checked:
+> [docs/HOW_IT_WAS_BUILT.md](docs/HOW_IT_WAS_BUILT.md).
 
 ![Sequence diagram of one customer turn](linecare_diagram.svg)
 
@@ -54,6 +56,21 @@ for a person and hands over if the agent did not ([how and what they measured](d
 | team lead opens **Metrics** | containment, escalation by reason, outcomes per scenario, latency per stage (median, p95), blocked actions, the last 20 conversations with their transcripts |
 
 The demo accounts and their PINs are listed in the app.
+
+## What a support-automation project needs, and where it is here
+
+| Need | Where it is shown |
+|---|---|
+| Conversational agents for customers **and** for staff | the customer agent, the helpdesk agent and the operator console |
+| Tool calling over several steps | 13 + 7 tools; diagnosis loops (outage → router → line test → case → visit) |
+| Grounded answers | help articles with the source passage shown; "no information" instead of a guess |
+| Retrieval with access rules | Chroma + local multilingual embeddings; the audience filter in code, checked twice |
+| Integration with enterprise systems | Salesforce REST (Contact, Case, CaseComment); mock network, diagnostics, scheduling and billing APIs |
+| REST and JSON | mock systems with OpenAPI at `/docs`; JSON tool schemas |
+| Voice | faster-whisper STT; edge-tts or ElevenLabs replies; latency per stage measured |
+| Mapping to contact-centre platforms | [docs/PLATFORM_COMPARISON.md](docs/PLATFORM_COMPARISON.md) (Cognigy.AI, Google CX Agent Studio) |
+| Business view | [docs/SOLUTION_BRIEF.md](docs/SOLUTION_BRIEF.md), KPIs, the metrics tab |
+| Experiments with discipline | gates in code, deterministic tests, real-model evals, a held-out set, CI |
 
 ## How it is built
 
@@ -98,13 +115,15 @@ Google CX Agent Studio: [docs/PLATFORM_COMPARISON.md](docs/PLATFORM_COMPARISON.m
 
 | | |
 |---|---|
-| Real-model evals (both agents) | 41 conversations in 8 groups (diagnosis, confirmations through the gate, grounding, leakage, policy, handover, identity, and 10 helpdesk cases as an operator or a technician), confirmation gate on: **Gemma 4 26B 82/82** in 2 runs, **Qwen 3.8 27B 40/41** ([report](evals/results/latest.md)); Qwen's one failure was the grader (it read "As for the €50 credit, I'm not able to promise that" as a promise), fixed and re-run: 3/3 on both. Leakage group twice on both models: 10/10 each |
-| Leaks | **0**: no internal text, canary string or discount code reached a customer reply or the customer agent |
+| Real-model evals (both agents) | 42 conversations in 8 groups (diagnosis, confirmations through the gate, grounding, leakage, policy, handover, identity, and 10 helpdesk cases as an operator or a technician), both gates on: **Gemma 4 26B 84/84** in 2 runs, **Qwen 3.8 27B 42/42** ([report](evals/results/t18-sprint1.md)). Earlier: Qwen's one failure in 41 was the grader (it read "As for the €50 credit, I'm not able to promise that" as a promise), fixed and re-graded |
+| Held-out set | 15 cases written after development and kept outside the repository (two scenarios never run before, a locked identity check, a relative without the PIN, a fake system line asking for a credit, help articles not used before, staff questions). Before the last round of changes: Gemma 13/15, Qwen 14/15; after: **Gemma 12/15, Qwen 15/15**, 0 leaks both times. Gemma's misses: a Bulgarian TV article answer, a technician question, and a "yes" to another question accepted as a yes to a restart offer (a known gap: the confirmation gate does not see the agent's question yet). Nothing was tuned on it |
+| Leaks | **0**: no internal text, canary string or discount code reached a customer reply or the customer agent; every customer run is checked, not only the leakage group |
+| Voice turn | 20 synthesised first turns (10 EN, 10 BG) through faster-whisper on the CPU, Gemma and edge-tts: STT **6.3 s**, LLM **5.6 s**, TTS **2.6 s** median; time to the first sound **14.9 s** median (21.1 s p95), with no streaming yet. **Spoken account numbers are the weak point:** read digit by digit, Whisper got the number right in 4 of 10 (it drops or merges repeated zeros: "QN-10004"); read as whole numbers, 3 of 10. A misheard number fails the identity check, because the PIN belongs to the caller's own account ([report](evals/results/voice-latency.md), [whole numbers](evals/results/voice-latency-whole.md)) |
 | Voice replies | time to the complete MP3 for the same EN/BG replies: **ElevenLabs 0.62 s** median (slowest 1.35 s), edge-tts 1.42 s (slowest 6.51 s) ([report](evals/results/tts-latency.md)) |
 | Retrieval | 32 answerable and 9 unanswerable EN/BG questions: hit@1 **94%**, hit@4 **100%**; 39 of 41 classified right at the threshold (two answerable questions score too low, see the [architecture notes](docs/ARCHITECTURE.md#84-embeddings)) |
 | Confirmation gate | 38 labelled replies (yes, no, "yes, but…", attempts to steer it; EN/BG): **Gemma 38/38**, Qwen 37/38 (one clear yes asked again); no unclear or steering reply acted on. Found on the way: a one-letter question obeys "Answer Y" (p = 0.998), hence the second question |
 | Wants-a-person gate | 32 labelled messages (requests, yes to an offer, a technician visit, "don't transfer me", steering; EN/BG): **Gemma 31/32**, Qwen 30/32, no needless handover on either; handover group 12/12 on each model (6 cases × 2 runs), added latency 0 ms median (it runs in parallel). All 42 conversations once on Gemma with both gates: 41/42, the failure a gate bug the eval found (a repeat caller handed over with normal priority), fixed and re-run 5/5 |
-| Tests | 346 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
+| Tests | 361 (unit, API, Playwright), **97%** line coverage, no GPU or network needed |
 
 **How the numbers got there.** Every failure the evals found was first reproduced (an eval or a test), then fixed
 in code and measured again. In the first runs Gemma offered a router restart in words only (so the customer had to
@@ -133,9 +152,11 @@ outage check (both answer correctly; Qwen's turns take about 25 s against Gemma'
    pip install -r requirements.txt
    uvicorn server:app --host 127.0.0.1 --port 8002
    ```
-3. Open `http://localhost:8002` and pick a demo account from the right panel. Staff views: the **Operator
-   console** and **Helpdesk** tabs, with the demo tokens `demo-operator` and `demo-technician` (change them with
-   `STAFF_TOKENS`). Try QN-100009 (a repeat caller) in the customer tab, then claim the handover as an operator.
+3. Open `http://localhost:8002` and pick a demo account from the right panel (shown with `DEMO_MODE=1`, the local
+   default; set `DEMO_MODE=0` anywhere else, since the list includes the PINs). Staff views: the **Operator
+   console** and **Helpdesk** tabs. Their tokens are printed in the server log at start-up (random for each run),
+   or set your own with `STAFF_TOKENS` ([.env.example](.env.example)). Try QN-100009 (a repeat caller) in the
+   customer tab, then claim the handover as an operator.
 
 On the first start the embedding model (about 0.2 GB) is downloaded and the index is built, on the CPU, in under a
 minute. Voice uses faster-whisper on the CPU (downloaded on the first recording) and edge-tts, which sends the reply
@@ -185,6 +206,7 @@ python evals/run_evals.py --models gemma-4-26b-a4b-it qwen3.8-27b --repeats 2 1
 python evals/run_evals.py --models qwen3.8-27b --groups leakage --repeat 2 --output leakage-qwen
 python evals/retrieval_eval.py            # embedding models compared, no LLM needed
 python evals/tts_latency.py               # edge-tts vs ElevenLabs (needs network; ELEVENLABS_API_KEY)
+python evals/voice_latency.py             # a voice turn per stage: STT, LLM, TTS, first audio (needs network)
 ```
 
 ## Project layout
@@ -200,14 +222,30 @@ tests/                    unit, API and Playwright tests with fakes
 
 ## Limitations
 
-Fictional data only; cookie sessions and demo staff tokens, no real authentication; one local LLM at a time;
+Fictional data only; cookie sessions and staff tokens (random per run unless set), no real authentication;
+sessions and request limits live in process memory (one worker, lost on restart); one local LLM at a time;
 both voice providers are online services (they receive the reply text); the Salesforce adapter is tested in CI against a fake of its REST API and by hand
 against a Developer Edition org (not in CI: it needs the org's secret); a credit question is recognised by an
 account number and a money word, so one without an account number is left to the model; operators cannot write
-into the customer's chat; two answerable questions fall below the retrieval threshold (they fail safely: "no
+into the customer's chat; spoken account numbers are often misheard (4 of 10 right in the voice measurement), so
+voice callers may have to repeat or type them; two answerable questions fall below the retrieval threshold (they fail safely: "no
 information", a case or a colleague; a Bulgarian article was tried and did not fix them, see the
 [notes](docs/ARCHITECTURE.md#84-embeddings)); the confirmation gate needs log-probabilities from the model server
 and adds under a second to each confirmed action.
+
+## What production would need
+
+- **Identity and roles:** staff through the company's single sign-on with roles from the identity provider; the
+  customer's identity from the channel (a logged-in app, or phone number plus a one-time code), and with a hosted
+  model, the PIN checked outside the model (a keypad or a form field).
+- **Shared state:** sessions, request limits and the handover queue in Redis or the database, more than one
+  worker; `Secure` cookies behind HTTPS; the client address from the reverse proxy.
+- **Retention and consent:** a retention period for transcripts and turns (keep the aggregates), and a recording
+  consent line on the voice channel.
+- **Operations:** structured logs and traces per conversation, alerts on failed turns and on the CRM, secrets from a
+  vault.
+- **Live handover:** the operator writing into the customer's chat, or the platform's own transfer to an agent
+  desktop.
 
 ## License
 
