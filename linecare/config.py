@@ -62,6 +62,7 @@ KB_TOP_K = 4
 # Speech-to-text runs locally on the CPU; the GPU is kept for the chat model.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
+MAX_AUDIO_SECONDS = int(os.environ.get("MAX_AUDIO_SECONDS", "60"))  # longer recordings are refused
 VOICE_LANGUAGES = ("en", "bg")
 WHISPER_PROMPTS = {
     "en": "Quillnet support: account number QN-100042, router, QN-Box 4, QN-Mesh Duo, Wi-Fi, PPPoE, outage, "

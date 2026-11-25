@@ -80,6 +80,28 @@ def test_transcription_normalises_the_account_number(monkeypatch):
     assert model.kwargs["language"] == "bg" and model.kwargs["initial_prompt"] == config.WHISPER_PROMPTS["bg"]
 
 
+def silent_wav(path, seconds: float):
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(bytes(2) * int(16000 * seconds))
+    return str(path)
+
+
+def test_a_recording_over_a_minute_is_refused_after_decoding(tmp_path, monkeypatch):
+    """Review T18.A2 / T25.S6: 15 MB of Opus is about an hour of audio for Whisper on the CPU. The length is
+    measured on the decoded audio (a real 90 s file here); the model is neither loaded nor asked."""
+    monkeypatch.setattr(stt, "get_whisper_model", lambda: pytest.fail("Whisper must not run"))
+    with pytest.raises(stt.AudioTooLong):
+        stt.transcribe_audio(silent_wav(tmp_path / "long.wav", 90), "en")
+    model = FakeWhisper({"en": 0.9})
+    monkeypatch.setattr(stt, "get_whisper_model", lambda: model)
+    assert stt.transcribe_audio(silent_wav(tmp_path / "short.wav", 5), "en")[1] == "en"
+
+
 def test_whisper_loads_once_on_the_cpu(monkeypatch):
     created = []
     monkeypatch.setattr(faster_whisper, "WhisperModel", lambda *a, **k: created.append(k) or object())
@@ -164,6 +186,16 @@ def test_unclear_too_long_and_failed_recordings(client, monkeypatch):
 
     monkeypatch.setattr(server, "transcribe_audio", broken)
     assert post_audio(client).json()["error_code"] == "stt_failed"
+
+
+def test_a_too_long_recording_gets_a_friendly_413(client, monkeypatch):
+    def too_long(path, language):
+        raise stt.AudioTooLong(95.0)
+
+    monkeypatch.setattr(server, "transcribe_audio", too_long)
+    response = post_audio(client)
+    assert response.status_code == 413 and response.json()["error_code"] == "too_long"
+    assert "60 seconds" in response.json()["message"]
 
 
 def test_text_to_speech_speaks_only_this_sessions_own_replies(client, fake_lm, monkeypatch):

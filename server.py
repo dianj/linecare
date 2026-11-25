@@ -30,7 +30,7 @@ from linecare.lmstudio import ensure_default_model_on_startup, list_available_mo
 from linecare.session import Session
 from linecare.staff import OPERATOR, StaffSession, role_for_token
 from linecare.voice.speech_text import clean_for_speech
-from linecare.voice.stt import transcribe_audio
+from linecare.voice.stt import AudioTooLong, transcribe_audio
 from linecare.voice.tts import make_tts
 from mocks.app import router as mock_router
 from mocks.scenarios import DEMO_CUSTOMERS, SCENARIOS
@@ -215,6 +215,10 @@ async def customer_voice(request: Request, audio: UploadFile = File(...), langua
         tmp.close()
         # The customer can fix the language in the UI; "auto" lets Whisper choose between English and Bulgarian.
         text, spoken_language = await run_in_threadpool(transcribe_audio, tmp.name, language)
+    except AudioTooLong as exc:
+        log.info("Voice message refused: %s", exc)
+        return JSONResponse({"error_code": "too_long", "message": f"The recording is too long. Please keep it under "
+                             f"{config.MAX_AUDIO_SECONDS} seconds, or type your message."}, status_code=413)
     except Exception:
         log.exception("Speech recognition failed")
         return JSONResponse({"error_code": "stt_failed", "message": "Speech recognition failed. Please try again "

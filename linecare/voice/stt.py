@@ -8,6 +8,15 @@ from linecare.voice.speech_text import normalise_account_numbers
 log = logging.getLogger("linecare.voice")
 _whisper_model = None
 _whisper_lock = threading.Lock()
+SAMPLE_RATE = 16000   # what faster-whisper's decode_audio returns
+
+
+class AudioTooLong(ValueError):
+    """A recording longer than MAX_AUDIO_SECONDS (measured after decoding, not by file size)."""
+
+    def __init__(self, seconds: float):
+        super().__init__(f"{seconds:.0f} s of audio, more than {config.MAX_AUDIO_SECONDS} s")
+        self.seconds = seconds
 
 
 def get_whisper_model():
@@ -41,8 +50,11 @@ def transcribe_audio(path: str, language: str = None) -> tuple[str, str]:
     normalised ("Q N one zero ..." -> "QN-100001"). The text is redacted later like typed text."""
     from faster_whisper import decode_audio
 
-    model = get_whisper_model()
+    # Decode first and measure: 15 MB of Opus is about an hour of speech, which Whisper on the CPU would grind through.
     audio = decode_audio(path)
+    if len(audio) / SAMPLE_RATE > config.MAX_AUDIO_SECONDS:
+        raise AudioTooLong(len(audio) / SAMPLE_RATE)
+    model = get_whisper_model()
     if language not in config.VOICE_LANGUAGES:
         language = pick_supported_language(model, audio)
     segments, _ = model.transcribe(audio, language=language, vad_filter=True, beam_size=5,
