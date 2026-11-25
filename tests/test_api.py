@@ -141,7 +141,7 @@ def test_an_llm_outage_returns_a_friendly_message_and_keeps_the_session(client, 
 
 
 def test_a_slow_model_times_out_cleanly(client, fake_lm, monkeypatch):
-    monkeypatch.setattr(loop, "llm_client", loop.llm_client.with_options(timeout=0.3, max_retries=0))
+    monkeypatch.setattr(config, "LLM_TIMEOUT_SECONDS", 0.3)            # each call (and its one retry) times out
     fake_lm.delay_s = 2
     data = chat(client, "Здравейте")
     assert data["system_error"] is True and "технически проблем" in data["reply"]

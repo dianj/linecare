@@ -17,6 +17,8 @@ ALLOWED_MODELS = [
 ]
 MODEL_NAME = os.environ.get("LLM_MODEL", ALLOWED_MODELS[0][0])
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "120"))
+# All model calls of one customer or staff turn together; past it the turn ends with the "technical problem" reply.
+TURN_BUDGET_SECONDS = float(os.environ.get("TURN_BUDGET_SECONDS", "90"))
 # "none" skips the model's hidden reasoning (measured in our own evals: about 12x faster, same accuracy).
 # Empty = the model's default.
 LLM_REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "none")

@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from linecare import config, db, handover_queue, metrics, ratelimit
 from linecare.agents.customer import run_customer_turn
 from linecare.agents.helpdesk import run_assist, run_helpdesk_turn
-from linecare.agents.loop import llm_client
+from linecare.agents.loop import TurnTimeout, llm_client
 from linecare.kb import retriever
 from linecare.language import detect_language
 from linecare.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
@@ -201,6 +201,9 @@ async def run_turn(request: Request, text: str, *, channel: str = "chat", stt_ms
                                              stt_ms=stt_ms)
         except (APIConnectionError, APITimeoutError):
             log.error("LM Studio is not reachable at %s", config.LLM_BASE_URL)
+            result = None
+        except TurnTimeout as exc:
+            log.warning("Customer turn in %s stopped: %s", session.conv_id, exc)
             result = None
         except Exception:
             log.exception("Customer turn failed")
