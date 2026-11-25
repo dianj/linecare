@@ -383,7 +383,7 @@ async function postTurn(request, typingText) {
         renderState(data.state);
         addQuickReplies(bubble, data.state);
         if (document.getElementById('voiceReplies').checked && !data.system_error) {
-            speak(data.reply, data.spoken_language || data.state.language);
+            speak(data.turn_id);
         }
     } catch (e) {
         typing.remove();
@@ -437,14 +437,14 @@ mic.addEventListener('click', async () => {
 });
 
 // --- Voice output ---
-async function speak(text, language) {
+// The server speaks only its own replies, by turn id (the language is the reply's, kept on the server).
+async function speak(turnId) {
+    if (!turnId) return;
     player.pause();
     const form = new FormData();
-    form.append('text', text);
-    form.append('language', language || 'en');
     form.append('gender', document.getElementById('voiceGender').value);
     try {
-        const response = await fetch('/api/tts', {method: 'POST', body: form});
+        const response = await fetch(`/api/tts/${encodeURIComponent(turnId)}`, {method: 'POST', body: form});
         if (!response.ok) { hint.textContent = 'Voice reply is not available right now.'; return; }
         player.src = URL.createObjectURL(await response.blob());
         await player.play();

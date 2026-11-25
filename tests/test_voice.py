@@ -166,17 +166,35 @@ def test_unclear_too_long_and_failed_recordings(client, monkeypatch):
     assert post_audio(client).json()["error_code"] == "stt_failed"
 
 
-def test_text_to_speech_endpoint(client, monkeypatch):
+def test_text_to_speech_speaks_only_this_sessions_own_replies(client, fake_lm, monkeypatch):
+    """Review T18.A1: /api/tts took any text from anyone, so with an ElevenLabs key anyone on the network could spend
+    credits. Now it speaks only a reply the server produced for this session, by its turn id, cached per voice."""
     fake = tts.FakeTTS()
     monkeypatch.setattr(server, "tts_provider", fake)
-    response = client.post("/api/tts", data={"text": "**Case 00001001**", "language": "bg", "gender": "male"})
+    fake_lm.script(reply="**Case 00001001** is open.")
+    turn = client.post("/api/customer/chat", json={"text": "Hello"}).json()
+    response = client.post(f"/api/tts/{turn['turn_id']}", data={"gender": "male"})
     assert response.status_code == 200 and response.headers["content-type"] == "audio/mpeg"
-    assert fake.calls == [("Case 0 0 0 0, 1 0 0 1", "bg", "bg-BG-BorislavNeural")]
-    assert client.post("/api/tts", data={"text": "**"}).status_code == 400
+    assert fake.calls == [("Case 0 0 0 0, 1 0 0 1 is open.", "en", "en-US-AndrewNeural")]
+    assert client.post(f"/api/tts/{turn['turn_id']}", data={"gender": "male"}).content == response.content
+    assert len(fake.calls) == 1                                          # the second time from the cache
 
+    other = TestClient(server.app)                                       # another browser, its own session
+    assert other.post(f"/api/tts/{turn['turn_id']}", data={"gender": "male"}).status_code == 404
+    assert client.post("/api/tts/" + "0" * 32, data={"gender": "male"}).status_code == 404
+    assert client.post("/api/tts", data={"text": "Anything I like"}).status_code in (404, 405)
+    assert len(fake.calls) == 1
+
+
+def test_text_to_speech_failure_and_an_empty_reply(client, fake_lm, monkeypatch):
     class Down:
         async def synthesize(self, text, language, gender):
             return None, "offline"
 
     monkeypatch.setattr(server, "tts_provider", Down())
-    assert client.post("/api/tts", data={"text": "Hi"}).json()["error_code"] == "tts_failed"
+    fake_lm.script(reply="Hi")
+    turn = client.post("/api/customer/chat", json={"text": "Hello"}).json()
+    assert client.post(f"/api/tts/{turn['turn_id']}").json()["error_code"] == "tts_failed"
+    fake_lm.script(reply="**")
+    turn = client.post("/api/customer/chat", json={"text": "Hello"}).json()
+    assert client.post(f"/api/tts/{turn['turn_id']}").status_code == 400

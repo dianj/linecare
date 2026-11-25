@@ -87,9 +87,22 @@ MODEL_SWITCHING = {
 }
 
 
+SPOKEN_REPLIES = 20   # replies per session that can still be spoken (the latest ones)
+
+
 def _new_entry() -> dict:
     session = Session(conv_id=db.new_conversation("customer", model_state["active"]))
-    return {"session": session, "lock": asyncio.Lock()}
+    # replies: turn id -> {"text", "language", "audio": {voice: mp3}}; only these can be spoken (POST /api/tts/{id})
+    return {"session": session, "lock": asyncio.Lock(), "replies": OrderedDict()}
+
+
+def remember_reply(entry: dict, text: str, language: str) -> str:
+    """Keep a reply the server produced, so the voice output can speak it (and only it) by its turn id."""
+    turn_id = uuid.uuid4().hex
+    entry["replies"][turn_id] = {"text": text, "language": language, "audio": {}}
+    while len(entry["replies"]) > SPOKEN_REPLIES:
+        entry["replies"].popitem(last=False)
+    return turn_id
 
 
 def get_session(request: Request) -> tuple[str, dict]:
@@ -152,6 +165,7 @@ async def run_turn(request: Request, text: str, *, channel: str = "chat", stt_ms
         return respond({"error_code": "busy", "message": "Please wait for the previous reply."}, cookie, 409)
     if model_state["switching"]:
         return respond({"reply": MODEL_SWITCHING[language], "tool_calls": [], "system_error": True,
+                        "turn_id": remember_reply(entry, MODEL_SWITCHING[language], language),
                         "state": public_state(session), **extra}, cookie)
 
     global active_turns
@@ -172,12 +186,14 @@ async def run_turn(request: Request, text: str, *, channel: str = "chat", stt_ms
 
     if result is None:
         return respond({"reply": TECHNICAL_PROBLEM[language], "tool_calls": [], "system_error": True,
+                        "turn_id": remember_reply(entry, TECHNICAL_PROBLEM[language], language),
                         "state": public_state(session), **extra}, cookie)
     if result.cap_reached:
         log.warning("Tool loop limit reached in %s", session.conv_id)
     tool_calls = [ui_tool_call(c) for c in result.tool_calls]
+    reply_language = extra.get("spoken_language") or session.message_language or language
     return respond({"reply": result.reply, "tool_calls": tool_calls, "model": model, "state": public_state(session),
-                    **extra}, cookie)
+                    "turn_id": remember_reply(entry, result.reply, reply_language), **extra}, cookie)
 
 
 @app.post("/api/customer/chat")
@@ -210,6 +226,7 @@ async def customer_voice(request: Request, audio: UploadFile = File(...), langua
     if len(text) < 2:
         cookie, entry = get_session(request)
         return respond({"reply": NOT_UNDERSTOOD[spoken_language], "tool_calls": [], "user_text": "",
+                        "turn_id": remember_reply(entry, NOT_UNDERSTOOD[spoken_language], spoken_language),
                         "spoken_language": spoken_language, "state": public_state(entry["session"])}, cookie)
     # The transcript goes back to the UI so the customer sees what was heard (in their own chat only); it is
     # redacted before it is stored or sent to the model again, like typed text.
@@ -220,15 +237,24 @@ async def customer_voice(request: Request, audio: UploadFile = File(...), langua
 tts_provider = make_tts()
 
 
-@app.post("/api/tts")
-async def text_to_speech(text: str = Form(...), language: str = Form("en"),
-                         gender: str = Form(config.DEFAULT_VOICE_GENDER)):
-    spoken = clean_for_speech(text)
+@app.post("/api/tts/{turn_id}")
+async def text_to_speech(turn_id: str, request: Request, gender: str = Form(config.DEFAULT_VOICE_GENDER)):
+    """Speak one of this session's own replies, by its turn id. Never free text: with a paid voice provider an open
+    endpoint would let anyone spend its credits. Each reply is synthesised once per voice and then served from the
+    session's cache."""
+    entry = sessions.get(request.cookies.get(SESSION_COOKIE))
+    turn = entry["replies"].get(turn_id) if entry else None
+    if turn is None:
+        return JSONResponse({"error_code": "unknown_turn", "message": "Nothing to speak."}, status_code=404)
+    if gender in turn["audio"]:
+        return Response(content=turn["audio"][gender], media_type="audio/mpeg")
+    spoken = clean_for_speech(turn["text"])
     if not spoken:
         return JSONResponse({"error_code": "empty", "message": "Nothing to speak."}, status_code=400)
-    language = language if language in config.VOICE_LANGUAGES else "en"
+    language = turn["language"] if turn["language"] in config.VOICE_LANGUAGES else "en"
     audio, problem = await tts_provider.synthesize(spoken, language, gender)
     if audio:
+        turn["audio"][gender] = audio
         return Response(content=audio, media_type="audio/mpeg")
     log.warning(problem)
     return JSONResponse({"error_code": "tts_failed", "message": "Voice reply is not available right now."},
