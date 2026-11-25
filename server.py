@@ -57,10 +57,15 @@ def _sync_pending_cases():
         log.exception("Retrying pending CRM writes failed")
 
 
+kb_state = {"ready": False, "chunks": None, "error": None}   # set by the start-up warm-up, shown by /api/health
+
+
 def _warm_kb():
     try:
-        retriever.get_index()
-    except Exception:
+        index = retriever.get_index()
+        kb_state.update(ready=True, chunks=index.collection.count(), error=None)
+    except Exception as exc:
+        kb_state.update(ready=False, chunks=None, error=type(exc).__name__)
         log.exception("Knowledge base index could not be built; search_help will report a system error")
 
 
@@ -310,7 +315,10 @@ def customer_state(request: Request):
 
 @app.get("/api/demo-customers")
 def demo_customers():
-    """Fictional demo accounts for the presenter (the UI shows them; nothing is filled in automatically)."""
+    """Fictional demo accounts for the presenter (the UI shows them; nothing is filled in automatically). They
+    include the PINs, so only with DEMO_MODE=1."""
+    if not config.DEMO_MODE:
+        raise HTTPException(404, {"error_code": "not_found", "message": "Demo accounts are not shown here."})
     return {"customers": [{"account_no": c.account_no, "name": f"{c.first_name} {c.last_name}", "pin": c.pin,
                            "scenario": c.scenario, "description": SCENARIOS[c.scenario]}
                           for c in DEMO_CUSTOMERS if c.scenario in {"S1", "S2", "S3", "S4", "S6", "S7"}]}
@@ -324,7 +332,9 @@ def health():
         llm = {"reachable": True, "model_available": active in models}
     except Exception:
         llm = {"reachable": False, "model_available": False}
-    return {"llm": llm, "model": active, "switching": model_state["switching"]}
+    return {"llm": llm, "model": active, "switching": model_state["switching"],
+            "embedder": {"kind": config.EMBEDDER, "model": config.EMBED_MODEL}, "kb": dict(kb_state),
+            "crm": {"backend": config.CRM_BACKEND}, "tts": {"provider": config.TTS_PROVIDER}}
 
 
 @app.get("/api/models")
@@ -334,8 +344,10 @@ def models():
 
 
 @app.post("/api/model")
-def select_model(model: str = Form(...)):
+def select_model(request: Request, model: str = Form(...)):
     # Sync endpoint: FastAPI runs it in a worker thread, so the long LM Studio load does not block the server.
+    # Staff only: a switch unloads the model every conversation is using.
+    staff_entry(request)
     if model not in {model_id for model_id, _ in config.ALLOWED_MODELS}:
         return JSONResponse({"error_code": "unknown_model", "message": f"Unknown model '{model}'."}, status_code=400)
     if model_state["switching"] or active_turns:

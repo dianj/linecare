@@ -350,8 +350,10 @@ function renderState(state) {
 }
 
 async function loadDemo() {
-    const data = await (await fetch('/api/demo-customers')).json();
+    const response = await fetch('/api/demo-customers');
     const body = document.getElementById('demo');
+    if (!response.ok) return;                 // DEMO_MODE=0: no demo accounts are listed
+    const data = await response.json();
     for (const c of data.customers) {
         const row = el('tr');
         row.appendChild(el('td', 'mono', c.account_no));

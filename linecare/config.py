@@ -115,6 +115,8 @@ MAX_REBOOTS_PER_CONVERSATION = 2
 CONFIRMATION_TTL_TURNS = 2
 MAX_MESSAGE_CHARS = 1000
 MAX_SESSIONS = 500
+# The local demo: the demo accounts with their PINs are listed for the presenter. Set DEMO_MODE=0 anywhere else.
+DEMO_MODE = os.environ.get("DEMO_MODE", "1") == "1"
 # Requests per minute and client address (token bucket): chat, voice and speech; staff login.
 CHAT_PER_MINUTE = int(os.environ.get("CHAT_PER_MINUTE", "60"))
 LOGIN_PER_MINUTE = int(os.environ.get("LOGIN_PER_MINUTE", "10"))

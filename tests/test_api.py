@@ -194,9 +194,35 @@ def test_health_and_models(client, fake_lm):
     assert health["llm"] == {"reachable": True, "model_available": True}
     models = client.get("/api/models").json()
     assert models["active"] == config.MODEL_NAME
+    assert client.post("/api/model", data={"model": "qwen3.8-27b"}).status_code == 401   # review T18.A6: staff only
+    assert fake_lm.loaded == {config.MODEL_NAME}
+    client.post("/api/staff/login", json={"token": "demo-operator"})
     assert client.post("/api/model", data={"model": "unknown"}).status_code == 400
     switched = client.post("/api/model", data={"model": "qwen3.8-27b"})
     assert switched.status_code == 200 and fake_lm.loaded == {"qwen3.8-27b"}
+
+
+def test_health_reports_every_part(client, fake_lm, monkeypatch):
+    """Review T18.A7: besides the LLM, the embedder and KB index, the CRM backend and the voice provider."""
+    server._warm_kb()                                     # what the start-up thread does
+    health = client.get("/api/health").json()
+    assert health["kb"]["ready"] is True and health["kb"]["chunks"] > 0 and health["kb"]["error"] is None
+    assert health["embedder"] == {"kind": config.EMBEDDER, "model": config.EMBED_MODEL}
+    assert health["crm"] == {"backend": config.CRM_BACKEND} and health["tts"] == {"provider": config.TTS_PROVIDER}
+
+    def broken():
+        raise OSError("model download failed")
+    monkeypatch.setattr(server.retriever, "get_index", broken)
+    server._warm_kb()
+    assert client.get("/api/health").json()["kb"] == {"ready": False, "chunks": None, "error": "OSError"}
+
+
+def test_demo_accounts_and_their_pins_only_in_demo_mode(client, monkeypatch):
+    """Review T18.A6: the list returns PINs, so it is there only with DEMO_MODE=1 (the local demo's default)."""
+    monkeypatch.setattr(config, "DEMO_MODE", False)
+    assert client.get("/api/demo-customers").status_code == 404
+    monkeypatch.setattr(config, "DEMO_MODE", True)
+    assert client.get("/api/demo-customers").status_code == 200
 
 
 # --- D2: knowledge base, cases, technician, handover ---------------------------------------
