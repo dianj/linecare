@@ -1,5 +1,6 @@
 """Settings from environment variables (see .env.example), read at import time. Imported by every other module."""
 import os
+import secrets
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,9 +34,22 @@ DECISION_TIMEOUT_SECONDS = float(os.environ.get("DECISION_TIMEOUT_SECONDS", "20"
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "data" / "linecare.db"))
 
 # --- Staff (helpdesk agent, operator console) ---
-# Demo authentication: token -> role. Override with STAFF_TOKENS="token1:operator,token2:technician".
-STAFF_TOKENS = dict(item.split(":", 1) for item in os.environ.get(
-    "STAFF_TOKENS", "demo-operator:operator,demo-technician:technician").split(",") if ":" in item)
+# Demo authentication: token -> role, from STAFF_TOKENS="token1:operator,token2:technician". Without it, random tokens
+# are made for this run and printed once (never fixed, public defaults).
+
+
+def load_staff_tokens(raw: str | None) -> dict[str, str]:
+    if raw:
+        return dict(item.strip().split(":", 1) for item in raw.split(",") if ":" in item)
+    tokens = {secrets.token_urlsafe(12): "operator", secrets.token_urlsafe(12): "technician"}
+    banner = "=" * 64
+    lines = "\n".join(f"  {role:<10} token for this run: {token}" for token, role in tokens.items())
+    print(f"\n{banner}\n{lines}\n  Set STAFF_TOKENS to keep the same tokens between restarts (.env.example)."
+          f"\n{banner}\n", flush=True)
+    return tokens
+
+
+STAFF_TOKENS = load_staff_tokens(os.environ.get("STAFF_TOKENS"))
 
 # --- CRM (see linecare/crm/) ---
 CRM_BACKEND = os.environ.get("CRM_BACKEND", "fake")  # fake (SQLite) | salesforce

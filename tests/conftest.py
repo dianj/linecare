@@ -29,6 +29,7 @@ os.environ["EMBEDDER"] = "fake"  # hashing embedder: tests the wiring and the fi
 os.environ["CHROMA_PATH"] = os.path.join(_TMP_DIR, "chroma")
 os.environ["KB_INCLUDE_TEST_DOCS"] = "0"
 os.environ["DECISION_GATE"] = "0"  # the confirmation gate has its own tests (tests/test_confirmation_gate.py)
+os.environ["STAFF_TOKENS"] = "demo-operator:operator,demo-technician:technician"   # fixed for the tests only
 
 from linecare import config, db  # noqa: E402  (must come after the environment is prepared)
 from mocks.scenarios import DEMO_BY_ACCOUNT  # noqa: E402

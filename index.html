@@ -177,7 +177,7 @@
             <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
             <button class="ghost" type="submit">Sign in</button>
         </form>
-        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <p class="note" data-whoami>Staff tokens are printed in the server log at start-up, or set with STAFF_TOKENS (demo authentication only).</p>
         <h2>Handover queue</h2>
         <div id="queue"><p class="muted">Sign in as an operator to see the queue.</p></div>
         <button class="ghost" id="refreshQueue" type="button">Refresh</button>
@@ -206,7 +206,7 @@
             <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
             <button class="ghost" type="submit">Sign in</button>
         </form>
-        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <p class="note" data-whoami>Staff tokens are printed in the server log at start-up, or set with STAFF_TOKENS (demo authentication only).</p>
         <p class="note">Operators read the internal policies, technicians the internal technical notes. Every look at a
             customer's data is written to the audit log.</p>
     </section>
@@ -226,7 +226,7 @@
             <input type="password" aria-label="Staff token" placeholder="Staff token" autocomplete="off">
             <button class="ghost" type="submit">Sign in</button>
         </form>
-        <p class="note" data-whoami>Demo tokens: demo-operator, demo-technician (demo authentication only).</p>
+        <p class="note" data-whoami>Staff tokens are printed in the server log at start-up, or set with STAFF_TOKENS (demo authentication only).</p>
         <h2>Filter</h2>
         <form class="filters" id="metricsFilter">
             <label>From <input type="date" name="from"></label>
@@ -506,7 +506,7 @@ async function api(url, options) {
 function renderWhoami() {
     for (const node of document.querySelectorAll('[data-whoami]')) {
         node.textContent = staff ? `Signed in as ${staff.staff_id} (${staff.role}).`
-                                 : 'Demo tokens: demo-operator, demo-technician (demo authentication only).';
+                                 : 'Staff tokens are printed in the server log at start-up, or set with STAFF_TOKENS (demo authentication only).';
     }
 }
 
